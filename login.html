@@ -525,7 +525,14 @@
         let response = null;
         let data = null;
 
-        const endpoints = [`${apiBase}/api/auth/signin`, `${apiBase}/auth/signin`];
+        const endpoints = [
+          `${apiBase}/api/auth/signin`,
+          `${apiBase}/api/signin`,
+          `${apiBase}/api/login`,
+          `${apiBase}/auth/signin`,
+          `${apiBase}/signin`,
+          `${apiBase}/login`
+        ];
         for (const ep of endpoints) {
           try {
             response = await fetch(ep, {
@@ -538,7 +545,7 @@
             } catch (jsonErr) {
               data = null;
             }
-            if (response.ok || [400, 401, 403, 404, 422].includes(response.status)) {
+            if (response.ok || [400, 401, 403, 409, 422].includes(response.status)) {
               break;
             }
           } catch (netErr) {
@@ -618,7 +625,12 @@
         let response = null;
         let data = null;
 
-        const endpoints = [`${apiBase}/api/auth/signup`, `${apiBase}/auth/signup`];
+        const endpoints = [
+          `${apiBase}/api/auth/signup`,
+          `${apiBase}/api/signup`,
+          `${apiBase}/auth/signup`,
+          `${apiBase}/signup`
+        ];
         for (const ep of endpoints) {
           try {
             response = await fetch(ep, {
