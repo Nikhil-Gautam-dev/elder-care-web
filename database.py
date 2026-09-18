@@ -5,6 +5,7 @@ import hashlib
 import secrets
 import tempfile
 from datetime import datetime, timedelta
+from typing import Optional
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column
@@ -453,6 +454,15 @@ ACTIVE_DB_TYPE = "Unknown"
 _init_lock = None
 _db_initialized = False
 
+def normalize_email(email: Optional[str]) -> str:
+    """
+    Standard email normalization across Kivo: trim whitespace and lowercase.
+    """
+    if not email:
+        return ""
+    return email.strip().lower()
+
+
 async def init_db():
     global engine, AsyncSessionLocal, ACTIVE_DB_TYPE, _init_lock, _db_initialized
 
@@ -495,6 +505,13 @@ async def init_db():
         # Create all tables cleanly
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+
+        # Enforce PostgreSQL / SQLite database-level unique index on email
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_kivo_accounts_email ON kivo_accounts (email);"))
+        except Exception as idx_err:
+            pass
 
         # Seed initial data if table is empty
         try:

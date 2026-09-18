@@ -436,15 +436,26 @@
       hideAlerts();
     }
 
-    function showAlert(text, isError = true) {
+    function showAlert(text, isError = true, allowHtml = false) {
       const errorBanner = document.getElementById('auth-error-banner');
       const successBanner = document.getElementById('auth-success-banner');
+      const errorTextEl = document.getElementById('auth-error-text');
+      const successTextEl = document.getElementById('auth-success-text');
+
       if (isError) {
-        document.getElementById('auth-error-text').innerText = text;
+        if (allowHtml) {
+          errorTextEl.innerHTML = text;
+        } else {
+          errorTextEl.innerText = text;
+        }
         errorBanner.classList.remove('hidden');
         successBanner.classList.add('hidden');
       } else {
-        document.getElementById('auth-success-text').innerText = text;
+        if (allowHtml) {
+          successTextEl.innerHTML = text;
+        } else {
+          successTextEl.innerText = text;
+        }
         successBanner.classList.remove('hidden');
         errorBanner.classList.add('hidden');
       }
@@ -453,6 +464,19 @@
     function hideAlerts() {
       document.getElementById('auth-error-banner').classList.add('hidden');
       document.getElementById('auth-success-banner').classList.add('hidden');
+    }
+
+    function switchToSigninWithEmail(email) {
+      switchTab('signin');
+      const signinEmail = document.getElementById('signin-email');
+      const signinPassword = document.getElementById('signin-password');
+      if (signinEmail && email) {
+        signinEmail.value = email;
+      }
+      if (signinPassword) {
+        signinPassword.focus();
+      }
+      hideAlerts();
     }
 
     // API Base URL Resolver for Port Resilience
@@ -466,67 +490,17 @@
       return '';
     }
 
-    function createFallbackSession(name, email, role = 'user', isPro = false) {
-      const parts = name.trim().split(/\s+/);
-      const initials = parts.length > 1 ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase() : name.slice(0, 2).toUpperCase();
-      const now = new Date();
-      const trialEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      return {
-        id: Date.now(),
-        username: email.split('@')[0],
-        email: email.toLowerCase(),
-        name: name,
-        full_name: name,
-        first_name: parts[0] || name,
-        initials: initials,
-        role: role,
-        phone: "+91 98450 12345",
-        language: "English",
-        timezone: "India Standard Time (IST)",
-        preferences: {},
-        is_active: true,
-        created_at: now.toISOString(),
-        created_at_formatted: now.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
-        subscription: isPro ? {
-          status: "active_pro",
-          plan: "kivo_pro",
-          plan_name: "Kivo Pro",
-          price: 14.99,
-          price_formatted: "$14.99 / month",
-          is_pro: true,
-          is_expired: false,
-          days_remaining: 0,
-          trial_start: now.toISOString(),
-          trial_end: trialEnd.toISOString(),
-          next_billing_date: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
-          payment_method: "Visa ending in 4242",
-          can_access_agent: true,
-          badge_text: "PRO"
-        } : {
-          status: "free_trial",
-          plan: "trial",
-          plan_name: "Kivo Free Trial",
-          price: 0.0,
-          price_formatted: "Free (7-Day Trial)",
-          is_pro: false,
-          is_expired: false,
-          days_remaining: 7,
-          trial_days_total: 7,
-          trial_start: now.toISOString(),
-          trial_end: trialEnd.toISOString(),
-          trial_end_formatted: trialEnd.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
-          next_billing_date: null,
-          payment_method: null,
-          can_access_agent: true,
-          badge_text: "FREE TRIAL"
-        }
-      };
-    }
+    // =========================================================================
+    // REAL POSTGRESQL AUTHENTICATION — STRICT PRODUCTION FLOW
+    // =========================================================================
 
-    // Real Authentication with Cloud / Serverless Fallback
+    let isSigninInProgress = false;
+
     async function handleSignin(e) {
-      e.preventDefault();
-      const email = document.getElementById('signin-email').value.trim();
+      if (e) e.preventDefault();
+      if (isSigninInProgress) return;
+
+      const email = document.getElementById('signin-email').value.trim().toLowerCase();
       const password = document.getElementById('signin-password').value;
       const btnText = document.getElementById('signin-text');
       const spinner = document.getElementById('signin-spinner');
@@ -537,6 +511,7 @@
         return;
       }
 
+      isSigninInProgress = true;
       btnText.innerText = 'Verifying Credentials...';
       spinner.classList.remove('hidden');
       if (submitBtn) submitBtn.disabled = true;
@@ -578,75 +553,58 @@
           showAlert(`Signed in as ${data.user.full_name || data.user.username}! Redirecting...`, false);
           setTimeout(() => {
             window.location.href = getSafeReturnUrl();
-          }, 600);
-          return;
-        }
-
-        // Handle specific 401/403 validation from live DB
-        if (response && (response.status === 401 || response.status === 403)) {
-          btnText.innerText = 'Sign In →';
-          spinner.classList.add('hidden');
-          if (submitBtn) submitBtn.disabled = false;
-          showAlert(data && data.detail ? data.detail : "Invalid email or password.", true);
-          return;
-        }
-
-        // Demo credentials fallback when backend serverless is in cold/isolated mode
-        const emailLower = email.toLowerCase();
-        if (emailLower === 'admin@kivo.ai' && password === 'admin123') {
-          const user = createFallbackSession('Administrator', 'admin@kivo.ai', 'admin', true);
-          localStorage.setItem('kivo_auth_user', JSON.stringify(user));
-          showAlert("Signed in as Administrator! Redirecting...", false);
-          setTimeout(() => { window.location.href = getSafeReturnUrl(); }, 600);
-          return;
-        }
-        if (emailLower === 'sarah@eldercare.ai' && password === 'password123') {
-          const user = createFallbackSession('Sarah Jenkins', 'sarah@eldercare.ai', 'caregiver', true);
-          localStorage.setItem('kivo_auth_user', JSON.stringify(user));
-          showAlert("Signed in as Sarah Jenkins! Redirecting...", false);
-          setTimeout(() => { window.location.href = getSafeReturnUrl(); }, 600);
-          return;
-        }
-        if (emailLower === 'abc@kivo.ai' && password === 'Vishal123') {
-          const user = createFallbackSession('ABC Account', 'abc@kivo.ai', 'user', true);
-          localStorage.setItem('kivo_auth_user', JSON.stringify(user));
-          showAlert("Signed in as ABC Account! Redirecting...", false);
-          setTimeout(() => { window.location.href = getSafeReturnUrl(); }, 600);
+          }, 500);
           return;
         }
 
         btnText.innerText = 'Sign In →';
         spinner.classList.add('hidden');
         if (submitBtn) submitBtn.disabled = false;
-        showAlert(data && data.detail ? data.detail : "Invalid email or password. Please verify your credentials or create a new account.", true);
+        isSigninInProgress = false;
+
+        const errorMsg = data && data.detail ? (typeof data.detail === 'string' ? data.detail : "Invalid email or password.") : "Invalid email or password. Please verify your credentials or create a new account.";
+        showAlert(errorMsg, true);
 
       } catch (err) {
-        console.error("Signin error:", err);
+        console.error("Authentication connection error:", err);
         btnText.innerText = 'Sign In →';
         spinner.classList.add('hidden');
         if (submitBtn) submitBtn.disabled = false;
-        showAlert("Invalid email or password.", true);
+        isSigninInProgress = false;
+        showAlert("Unable to connect to authentication services. Please verify your connection.", true);
       }
     }
 
+    let isRegistrationInProgress = false;
+
     async function handleSignup(e) {
-      e.preventDefault();
+      if (e) e.preventDefault();
+      if (isRegistrationInProgress) return;
+
       const name = document.getElementById('signup-name').value.trim();
-      const email = document.getElementById('signup-email').value.trim();
+      const email = document.getElementById('signup-email').value.trim().toLowerCase();
       const password = document.getElementById('signup-password').value;
       const btnText = document.getElementById('signup-text');
       const spinner = document.getElementById('signup-spinner');
       const submitBtn = document.getElementById('btn-submit-signup');
 
-      if (!name || !email || !password) {
-        showAlert("Please fill out all fields.", true);
+      // 1. Frontend Validation
+      if (!name || name.length < 2) {
+        showAlert("Please enter your full name (at least 2 characters).", true);
         return;
       }
-      if (password.length < 6) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!email || !emailRegex.test(email)) {
+        showAlert("Please enter a valid email address.", true);
+        return;
+      }
+      if (!password || password.length < 6) {
         showAlert("Password must be at least 6 characters.", true);
         return;
       }
 
+      // 2. In-Flight Protection
+      isRegistrationInProgress = true;
       btnText.innerText = 'Creating Account...';
       spinner.classList.remove('hidden');
       if (submitBtn) submitBtn.disabled = true;
@@ -683,43 +641,58 @@
           } catch (e2) {}
         }
 
-        // 1. Success from Backend
-        if (response && response.ok && data && data.user) {
+        // 3. Success (HTTP 201 / 200) from Real PostgreSQL
+        if (response && (response.status === 201 || response.status === 200) && data && data.user) {
           localStorage.setItem('kivo_auth_user', JSON.stringify(data.user));
-          showAlert("Account created! 7-Day Free Trial activated. Redirecting...", false);
-          setTimeout(() => { window.location.href = getSafeReturnUrl(); }, 700);
+          showAlert("Account created successfully! 7-Day Free Trial activated. Redirecting...", false);
+          setTimeout(() => {
+            window.location.href = getSafeReturnUrl();
+          }, 600);
           return;
         }
 
-        // 2. Specific validation rejection from Live DB (e.g. duplicate email)
-        if (response && response.status === 400) {
-          btnText.innerText = 'Create Account & Start Trial →';
-          spinner.classList.add('hidden');
-          if (submitBtn) submitBtn.disabled = false;
-          showAlert(data && data.detail ? data.detail : `An account with '${email}' is already registered. Please sign in instead.`, true);
+        // 4. Duplicate Email Conflict (HTTP 409)
+        btnText.innerText = 'Create Account & Start Trial →';
+        spinner.classList.add('hidden');
+        if (submitBtn) submitBtn.disabled = false;
+        isRegistrationInProgress = false;
+
+        if (response && response.status === 409) {
+          const duplicateHtml = `
+            <div class="flex items-center justify-between gap-3 w-full">
+              <span>An account with this email already exists.</span>
+              <button type="button" onclick="switchToSigninWithEmail('${email}')" class="font-bold underline text-rose-700 hover:text-rose-900 transition-colors whitespace-nowrap">Sign In →</button>
+            </div>
+          `;
+          showAlert(duplicateHtml, true, true);
           return;
         }
 
-        if (response && response.status === 422) {
-          btnText.innerText = 'Create Account & Start Trial →';
-          spinner.classList.add('hidden');
-          if (submitBtn) submitBtn.disabled = false;
-          showAlert("Please provide valid information (name, email, and password of at least 6 characters).", true);
+        // 5. Validation Rejection (HTTP 422 / 400)
+        if (response && (response.status === 422 || response.status === 400)) {
+          let errMsg = "Invalid registration details. Please check all fields.";
+          if (data && data.detail) {
+            if (typeof data.detail === 'string') {
+              errMsg = data.detail;
+            } else if (Array.isArray(data.detail)) {
+              errMsg = data.detail.map(d => d.msg || d.detail || JSON.stringify(d)).join('; ');
+            }
+          }
+          showAlert(errMsg, true);
           return;
         }
 
-        // 3. Fallback to resilient client session if serverless container is cold or unreachable
-        const fallbackUser = createFallbackSession(name, email, 'user', false);
-        localStorage.setItem('kivo_auth_user', JSON.stringify(fallbackUser));
-        showAlert("Account created! 7-Day Free Trial activated. Redirecting...", false);
-        setTimeout(() => { window.location.href = getSafeReturnUrl(); }, 700);
+        // 6. Generic Failure
+        const fallbackMsg = (data && data.detail && typeof data.detail === 'string') ? data.detail : "Unable to create account. Please check your network connection and try again.";
+        showAlert(fallbackMsg, true);
 
       } catch (err) {
-        console.error("Signup fallback session created due to:", err);
-        const fallbackUser = createFallbackSession(name, email, 'user', false);
-        localStorage.setItem('kivo_auth_user', JSON.stringify(fallbackUser));
-        showAlert("Account created! 7-Day Free Trial activated. Redirecting...", false);
-        setTimeout(() => { window.location.href = getSafeReturnUrl(); }, 700);
+        console.error("Signup network error:", err);
+        btnText.innerText = 'Create Account & Start Trial →';
+        spinner.classList.add('hidden');
+        if (submitBtn) submitBtn.disabled = false;
+        isRegistrationInProgress = false;
+        showAlert("Unable to connect to registration services. Please check that the server is online.", true);
       }
     }
 

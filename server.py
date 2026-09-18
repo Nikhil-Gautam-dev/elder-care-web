@@ -7,16 +7,19 @@ from typing import Optional, List
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Depends, Query, Body, Response
+import re
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, desc, func
+from sqlalchemy.exc import IntegrityError
 
 from database import (
     init_db,
     get_db_session,
     get_active_db_type,
+    normalize_email,
     RuleModel,
     EventLogModel,
     ApprovalModel,
@@ -675,32 +678,53 @@ async def get_stats(session: AsyncSession = Depends(get_db_session)):
 # 8. AUTHENTICATION & SECURITY ENDPOINTS (PostgreSQL Real Auth)
 # ==============================================================================
 
-@app.post("/api/auth/signup", tags=["Auth"])
-@app.post("/auth/signup", tags=["Auth"])
+@app.post("/api/auth/signup", status_code=201, tags=["Auth"])
+@app.post("/auth/signup", status_code=201, tags=["Auth"])
 async def auth_signup(
     req: SignUpRequest,
     session: AsyncSession = Depends(get_db_session)
 ):
     """
-    Registers a new account in PostgreSQL / SQLite with secure hashed credentials.
-    Rejects duplicate email or usernames.
+    Registers a new account in PostgreSQL with secure hashed credentials.
+    Strictly enforces One Email = One Account via normalized email checks and DB unique constraints.
+    Rejects duplicates with HTTP 409 Conflict.
     """
-    try:
-        email_clean = req.email.strip().lower()
-        name_clean = req.name.strip()
-        username_clean = email_clean.split("@")[0]
+    # 1. Authoritative Backend Normalization & Validation
+    email_clean = normalize_email(req.email)
+    name_clean = req.name.strip() if req.name else ""
 
-        # 1. Check if email already registered
+    if not name_clean or len(name_clean) < 2:
+        raise HTTPException(
+            status_code=422,
+            detail="Please provide a valid full name (at least 2 characters)."
+        )
+
+    if not email_clean or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_clean):
+        raise HTTPException(
+            status_code=422,
+            detail="Please provide a valid email address."
+        )
+
+    if not req.password or len(req.password) < 6:
+        raise HTTPException(
+            status_code=422,
+            detail="Password must be at least 6 characters."
+        )
+
+    username_clean = email_clean.split("@")[0]
+
+    try:
+        # 2. Check if email already registered in PostgreSQL
         existing_email = await session.execute(
-            select(AccountModel).where(AccountModel.email == email_clean)
+            select(AccountModel).where(func.lower(AccountModel.email) == email_clean)
         )
         if existing_email.scalars().first():
             raise HTTPException(
-                status_code=400,
-                detail=f"An account with email '{email_clean}' is already registered. Please sign in instead."
+                status_code=409,
+                detail="An account with this email already exists."
             )
 
-        # 2. Check if username taken, append random suffix if needed
+        # 3. Check if username taken, append random suffix if needed
         existing_user = await session.execute(
             select(AccountModel).where(AccountModel.username == username_clean)
         )
@@ -708,7 +732,7 @@ async def auth_signup(
             import random
             username_clean = f"{username_clean}_{random.randint(100, 999)}"
 
-        # 3. Hash password and persist in DB
+        # 4. Hash password and persist in PostgreSQL
         pw_hash = hash_password(req.password)
         now = datetime.utcnow()
         new_user = AccountModel(
@@ -725,8 +749,17 @@ async def auth_signup(
             billing_cycle="monthly"
         )
         session.add(new_user)
-        await session.commit()
-        await session.refresh(new_user)
+        
+        # 5. Commit with database-level uniqueness enforcement
+        try:
+            await session.commit()
+            await session.refresh(new_user)
+        except IntegrityError:
+            await session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="An account with this email already exists."
+            )
 
         return {
             "status": "success",
@@ -758,17 +791,17 @@ async def auth_signin(
     session: AsyncSession = Depends(get_db_session)
 ):
     """
-    Authenticates user against PostgreSQL / SQLite database.
+    Authenticates user against PostgreSQL database.
     Strictly verifies email/username and password hash.
     Rejects unauthorized, unauthenticated, or non-existent logins.
     """
     try:
-        identifier = req.email.strip().lower()
+        identifier = normalize_email(req.email)
         
-        # 1. Lookup user by email OR username
+        # 1. Lookup user in PostgreSQL by normalized email OR username
         result = await session.execute(
             select(AccountModel).where(
-                (AccountModel.email == identifier) | (AccountModel.username == identifier)
+                (func.lower(AccountModel.email) == identifier) | (AccountModel.username == identifier)
             )
         )
         user = result.scalars().first()
@@ -829,10 +862,10 @@ async def auth_me(
     if not email:
         return {"authenticated": False, "user": None}
 
-    identifier = email.strip().lower()
+    identifier = normalize_email(email)
     result = await session.execute(
         select(AccountModel).where(
-            (AccountModel.email == identifier) | (AccountModel.username == identifier)
+            (func.lower(AccountModel.email) == identifier) | (AccountModel.username == identifier)
         )
     )
     user = result.scalars().first()
