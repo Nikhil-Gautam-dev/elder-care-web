@@ -72,6 +72,37 @@ async def global_exception_handler(request, exc):
     )
 
 
+# Explicit OPTIONS preflight handler for all /api/auth routes
+# Required for Vercel — some CDN edge nodes don't auto-forward OPTIONS to FastAPI
+@app.options("/api/auth/signup")
+@app.options("/api/signup")
+@app.options("/auth/signup")
+@app.options("/api/auth/signin")
+@app.options("/api/signin")
+@app.options("/auth/signin")
+async def options_handler():
+    from fastapi.responses import Response
+    return Response(
+        status_code=204,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        }
+    )
+
+
+# Diagnostic health check endpoint
+@app.get("/api/health", tags=["System"])
+@app.get("/health", tags=["System"])
+async def health_check():
+    from database import get_active_db_type
+    return {
+        "status": "ok",
+        "db": get_active_db_type(),
+    }
+
+
 
 # ==============================================================================
 # PYDANTIC SCHEMAS
