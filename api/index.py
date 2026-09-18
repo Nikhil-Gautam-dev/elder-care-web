@@ -8,12 +8,16 @@ if root_dir not in sys.path:
 
 try:
     from server import app
+    handler = app
+    application = app
 except Exception as e:
     err_msg = traceback.format_exc()
     print(f"[Vercel Startup Error]: {err_msg}")
     from fastapi import FastAPI
     from fastapi.responses import JSONResponse
     app = FastAPI(title="Kivo Interpreter Fallback")
+    handler = app
+    application = app
 
     @app.api_route("/{path_name:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"])
     async def catch_all(path_name: str):
