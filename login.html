@@ -480,12 +480,15 @@
     }
 
     // API Base URL Resolver for Port Resilience
+    // API Base URL Resolver for Port Resilience
     function getApiBaseUrl() {
       if (window.location.protocol === 'file:') {
         return 'http://127.0.0.1:8000';
       }
-      if (window.location.port && !['8000', '80', '443'].includes(window.location.port)) {
-        return `${window.location.protocol}//${window.location.hostname}:8000`;
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        if (window.location.port && window.location.port !== '8000') {
+          return `${window.location.protocol}//${window.location.hostname}:8000`;
+        }
       }
       return '';
     }
@@ -522,30 +525,25 @@
         let response = null;
         let data = null;
 
-        try {
-          response = await fetch(`${apiBase}/api/auth/signin`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
-          });
+        const endpoints = [`${apiBase}/api/auth/signin`, `${apiBase}/auth/signin`];
+        for (const ep of endpoints) {
           try {
-            data = await response.json();
-          } catch (e) {
-            data = null;
-          }
-        } catch (fetchErr) {
-          try {
-            response = await fetch(`${apiBase}/auth/signin`, {
+            response = await fetch(ep, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email, password })
             });
             try {
               data = await response.json();
-            } catch (e) {
+            } catch (jsonErr) {
               data = null;
             }
-          } catch (e2) {}
+            if (response.ok || [400, 401, 403, 404, 422].includes(response.status)) {
+              break;
+            }
+          } catch (netErr) {
+            console.warn(`Signin endpoint ${ep} unreachable:`, netErr);
+          }
         }
 
         if (response && response.ok && data && data.user) {
@@ -562,7 +560,12 @@
         if (submitBtn) submitBtn.disabled = false;
         isSigninInProgress = false;
 
-        const errorMsg = data && data.detail ? (typeof data.detail === 'string' ? data.detail : "Invalid email or password.") : "Invalid email or password. Please verify your credentials or create a new account.";
+        let errorMsg = "Invalid email or password. Please verify your credentials or create a new account.";
+        if (data && data.detail) {
+          errorMsg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+        } else if (response && response.status === 404) {
+          errorMsg = "Account not found. Please create a new account.";
+        }
         showAlert(errorMsg, true);
 
       } catch (err) {
@@ -615,33 +618,28 @@
         let response = null;
         let data = null;
 
-        try {
-          response = await fetch(`${apiBase}/api/auth/signup`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, password, role: 'user' })
-          });
+        const endpoints = [`${apiBase}/api/auth/signup`, `${apiBase}/auth/signup`];
+        for (const ep of endpoints) {
           try {
-            data = await response.json();
-          } catch (e) {
-            data = null;
-          }
-        } catch (fetchErr) {
-          try {
-            response = await fetch(`${apiBase}/auth/signup`, {
+            response = await fetch(ep, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ name, email, password, role: 'user' })
             });
             try {
               data = await response.json();
-            } catch (e) {
+            } catch (jsonErr) {
               data = null;
             }
-          } catch (e2) {}
+            if (response.ok || [400, 409, 422].includes(response.status)) {
+              break;
+            }
+          } catch (netErr) {
+            console.warn(`Signup endpoint ${ep} unreachable:`, netErr);
+          }
         }
 
-        // 3. Success (HTTP 201 / 200) from Real PostgreSQL
+        // 3. Success (HTTP 201 / 200) from Real Database
         if (response && (response.status === 201 || response.status === 200) && data && data.user) {
           localStorage.setItem('kivo_auth_user', JSON.stringify(data.user));
           showAlert("Account created successfully! 7-Day Free Trial activated. Redirecting...", false);
@@ -682,8 +680,15 @@
           return;
         }
 
-        // 6. Generic Failure
-        const fallbackMsg = (data && data.detail && typeof data.detail === 'string') ? data.detail : "Unable to create account. Please check your network connection and try again.";
+        // 6. Generic or Server Failure
+        let fallbackMsg = "Unable to create account. Please check your network connection and try again.";
+        if (data && data.detail && typeof data.detail === 'string') {
+          fallbackMsg = data.detail;
+        } else if (data && data.message && typeof data.message === 'string') {
+          fallbackMsg = data.message;
+        } else if (response && response.status) {
+          fallbackMsg = `Unable to create account (Server error ${response.status}). Please try again.`;
+        }
         showAlert(fallbackMsg, true);
 
       } catch (err) {

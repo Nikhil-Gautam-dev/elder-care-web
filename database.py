@@ -35,8 +35,6 @@ def get_sqlite_url():
     is_serverless = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
     if is_serverless:
         p = os.path.join(tempfile.gettempdir(), "kivo_local.db").replace("\\", "/")
-        if not p.startswith("/"):
-            p = "/" + p
         return f"sqlite+aiosqlite:///{p}"
     return "sqlite+aiosqlite:///./kivo_local.db"
 
