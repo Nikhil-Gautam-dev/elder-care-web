@@ -1,12 +1,22 @@
 {
-  "rewrites": [
+  "builds": [
     {
-      "source": "/login",
-      "destination": "/login.html"
+      "src": "api/index.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/login",
+      "dest": "/login.html"
     },
     {
-      "source": "/signup",
-      "destination": "/login.html"
+      "src": "/signup",
+      "dest": "/login.html"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "api/index.py"
     }
   ]
 }
