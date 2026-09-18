@@ -680,6 +680,8 @@ async def get_stats(session: AsyncSession = Depends(get_db_session)):
 
 @app.post("/api/auth/signup", status_code=201, tags=["Auth"])
 @app.post("/auth/signup", status_code=201, tags=["Auth"])
+@app.post("/api/signup", status_code=201, tags=["Auth"])
+@app.post("/signup", status_code=201, tags=["Auth"])
 async def auth_signup(
     req: SignUpRequest,
     session: AsyncSession = Depends(get_db_session)
@@ -786,6 +788,10 @@ async def auth_signup(
 
 @app.post("/api/auth/signin", tags=["Auth"])
 @app.post("/auth/signin", tags=["Auth"])
+@app.post("/api/signin", tags=["Auth"])
+@app.post("/signin", tags=["Auth"])
+@app.post("/api/login", tags=["Auth"])
+@app.post("/login", tags=["Auth"])
 async def auth_signin(
     req: SignInRequest,
     session: AsyncSession = Depends(get_db_session)
@@ -852,6 +858,8 @@ async def auth_signin(
 
 @app.get("/api/auth/me", tags=["Auth"])
 @app.get("/auth/me", tags=["Auth"])
+@app.get("/api/me", tags=["Auth"])
+@app.get("/me", tags=["Auth"])
 async def auth_me(
     email: Optional[str] = Query(None, description="Current authenticated user email"),
     session: AsyncSession = Depends(get_db_session)
