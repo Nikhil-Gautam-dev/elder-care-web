@@ -1,0 +1,28 @@
+{
+  "name": "@eldercare/shared",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shared types, utilities, and constants for the ElderCare monorepo",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@eldercare/eslint-config": "workspace:*",
+    "@eldercare/tsconfig": "workspace:*",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@eldercare/prettier-config",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shared Prettier configuration for ElderCare monorepo",
+  "main": "index.json",
+  "prettier": "./index.json",
+  "keywords": [
+    "prettier",
+    "config",
+    "eldercare"
+  ]
+}

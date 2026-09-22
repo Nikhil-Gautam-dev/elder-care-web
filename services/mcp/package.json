@@ -1,0 +1,26 @@
+{
+  "name": "@eldercare/mcp",
+  "version": "0.0.1",
+  "private": true,
+  "description": "ElderCare MCP (Model Context Protocol) service (Node.js + TypeScript)",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "echo 'Service not set up yet — initialize your MCP server here'",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "lint": "[ -d src ] && eslint src || echo 'No src/ — skipping lint'",
+    "lint:fix": "[ -d src ] && eslint src --fix || echo 'No src/ — skipping lint'",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@eldercare/eslint-config": "workspace:*",
+    "@eldercare/tsconfig": "workspace:*",
+    "@eldercare/prettier-config": "workspace:*",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "@eldercare/shared": "workspace:*"
+  },
+  "prettier": "@eldercare/prettier-config"
+}

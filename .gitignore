@@ -1,32 +1,51 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
+# ElderCare Monorepo — .gitignore
 
-# Databases & local sqlite
-*.db
-*.sqlite
-*.sqlite3
+# ─── Dependencies ────────────────────────────────────────────────────────────
+node_modules/
+.pnpm-store/
 
-# Environment variables & secrets
+# ─── Build Outputs ───────────────────────────────────────────────────────────
+dist/
+build/
+out/
+.next/
+.nuxt/
+.output/
+.vercel/
+.netlify/
+
+# ─── Environment / Secrets ───────────────────────────────────────────────────
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
 
-# IDE & OS
-.vscode/
-.idea/
+# ─── Logs ────────────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── Editor / OS ─────────────────────────────────────────────────────────────
 .DS_Store
+.DS_Store?
+._*
 Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Temp / Cache
-.system_generated/
-scratch/
-tmp/
-temp/
+# ─── TypeScript ──────────────────────────────────────────────────────────────
+*.tsbuildinfo
 
+# ─── Test / Coverage ─────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ─── Turbo ───────────────────────────────────────────────────────────────────
+.turbo/
+
+# ─── Misc ────────────────────────────────────────────────────────────────────
+*.local

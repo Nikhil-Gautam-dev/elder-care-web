@@ -1,0 +1,20 @@
+{
+  "name": "@eldercare/pharmacy-web",
+  "version": "0.0.1",
+  "private": true,
+  "description": "ElderCare pharmacy portal web application",
+  "scripts": {
+    "dev": "echo 'Framework not set up yet — run your framework init here'",
+    "build": "echo 'Framework not set up yet'",
+    "lint": "[ -d src ] && eslint src || echo 'No src/ — skipping lint'",
+    "lint:fix": "[ -d src ] && eslint src --fix || echo 'No src/ — skipping lint'",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@eldercare/eslint-config": "workspace:*",
+    "@eldercare/tsconfig": "workspace:*",
+    "@eldercare/prettier-config": "workspace:*",
+    "typescript": "^5.5.0"
+  },
+  "prettier": "@eldercare/prettier-config"
+}

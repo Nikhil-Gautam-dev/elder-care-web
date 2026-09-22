@@ -1,0 +1,23 @@
+{
+  "name": "@eldercare/eslint-config",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shared ESLint configuration for ElderCare monorepo",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./node": "./node.js"
+  },
+  "dependencies": {
+    "typescript-eslint": "^8.0.0"
+  },
+  "peerDependencies": {
+    "eslint": "^9.0.0"
+  },
+  "keywords": [
+    "eslint",
+    "config",
+    "eldercare"
+  ]
+}

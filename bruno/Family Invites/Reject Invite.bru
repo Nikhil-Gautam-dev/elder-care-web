@@ -1,0 +1,15 @@
+meta {
+  name: Reject Invite
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/family/invites/{{inviteToken}}/reject
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
