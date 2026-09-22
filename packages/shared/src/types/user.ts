@@ -105,3 +105,9 @@ export type UpdateFamilyMemberBody = Partial<
     | "canManageRides"
   >
 >;
+
+export interface AuthContext {
+  id: string;
+  phone: string;
+  role: "user" | "admin";
+}

@@ -16,4 +16,5 @@ export type {
   IFamilyInvite,
   InviteStatus,
   CreateInviteBody,
+  AuthContext,
 } from "./types/user.js";

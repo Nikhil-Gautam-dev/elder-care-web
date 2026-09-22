@@ -1,15 +1,17 @@
 meta {
   name: Health Check
   type: http
-  seq: 2
+  seq: 3
 }
 
 get {
-  url: {{baseUrl}}/health
+  url: {{base-mcp-url}}/health
   body: none
   auth: none
 }
 
 vars:pre-request {
   baseUrl: http://localhost:3001
+  base-agent-url: http://localhost:3002
+  base-mcp-url: http://localhost:3003
 }
