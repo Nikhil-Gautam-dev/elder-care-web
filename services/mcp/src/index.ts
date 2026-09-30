@@ -74,12 +74,11 @@ async function start(): Promise<void> {
   Endpoint:  http://localhost:${PORT}/mcp
 
   Tools registered:
-    - get_elder_profile
+    - get_profile
     - get_family_members
-    - get_medication_preference
-    - get_ride_preference
-    - send_family_notification
     - get_pending_invites
+    - get_notifications
+    - send_family_notification
 `);
   });
 }

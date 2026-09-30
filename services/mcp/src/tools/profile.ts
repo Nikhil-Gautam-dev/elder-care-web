@@ -1,44 +1,31 @@
-import { resolveTargetUserAndAuth } from '../data/resolver.js';
 import type { AuthContext } from '@eldercare/shared';
+import { authorize, isFailure, type ToolResult } from './result.js';
 
-export interface ToolResult {
-  success: boolean;
-  user?: Record<string, unknown>;
-  error?: string;
-}
-
-export async function getElderProfile(userId: string, auth?: AuthContext): Promise<ToolResult> {
-  const resolved = await resolveTargetUserAndAuth(userId, auth);
-
-  if (resolved.error || !resolved.targetUser) {
-    return {
-      success: false,
-      error: resolved.error ?? `No profile found for '${userId}'.`,
-    };
-  }
-
-  if (!resolved.isSelf && !resolved.isAdmin && !resolved.isLinkedFamily) {
-    return {
-      success: false,
-      error: 'Access forbidden: You do not have permission to access this elder profile.',
-    };
-  }
+export async function getProfile(
+  person: string | undefined,
+  auth?: AuthContext,
+): Promise<ToolResult> {
+  const resolved = await authorize(person, auth, 'self-or-family');
+  if (isFailure(resolved)) return resolved;
 
   const u = resolved.targetUser;
-
   return {
     success: true,
-    user: {
-      userId: u._id.toString(),
+    isSelf: resolved.isSelf,
+    relationshipToCaller: resolved.relationshipWithCaller,
+    profile: {
       name: u.name,
-      phone: u.phone,
       age: u.age,
+      phone: u.phone,
       email: u.email,
       address: u.address,
-      preferences: u.preferences,
-      accessibility: u.accessibility,
+      language: u.preferences?.language,
+      usualPharmacy: u.preferences?.usualPharmacy,
+      preferredRide: u.preferences?.preferredRide,
+      notificationChannel: u.preferences?.notificationChannel,
+      largeText: u.accessibility?.largeText,
+      voiceEnabled: u.accessibility?.voiceEnabled,
       status: u.status,
-      relationship: resolved.relationshipWithCaller ?? undefined,
     },
   };
 }

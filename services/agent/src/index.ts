@@ -4,82 +4,54 @@ import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 
-import { ElderCareAgent, ElderCareAgentMcp } from './agents/index.js';
+import { ElderCareAgent } from './agents/index.js';
 import { ElderCareMcpClient } from './mcp/client.js';
 import { config, validateConfig } from './config.js';
 import type { AuthContext } from '@eldercare/shared';
 
 validateConfig();
 
-type AnyAgent = ElderCareAgent | ElderCareAgentMcp;
-
-const sessions = new Map<string, AnyAgent>();
+const sessions = new Map<string, ElderCareAgent>();
 
 let mcpClient: ElderCareMcpClient | null = null;
 
-async function initMcp(): Promise<boolean> {
-  if (!process.env['MCP_SERVER_URL']) return false;
-
-  try {
-    mcpClient = new ElderCareMcpClient();
-    await mcpClient.connect();
-    return true;
-  } catch (err) {
-    console.warn('[agent] MCP connection failed — falling back to hardcoded tools:', err);
-    mcpClient = null;
-    return false;
+/** Connects to the MCP server on first use (and again after a failed attempt). */
+async function getMcp(): Promise<ElderCareMcpClient> {
+  if (!mcpClient) {
+    const client = new ElderCareMcpClient();
+    await client.connect();
+    mcpClient = client;
   }
+  return mcpClient;
 }
 
-function createAgent(): AnyAgent {
-  if (mcpClient) return new ElderCareAgentMcp(mcpClient);
-  return new ElderCareAgent();
-}
-
-function getOrCreateSession(sessionId: string): AnyAgent {
-  if (!sessions.has(sessionId)) {
+async function getOrCreateSession(sessionId: string, ownerId: string): Promise<ElderCareAgent> {
+  let agent = sessions.get(sessionId);
+  if (!agent) {
     console.log(`[agent] New session created: ${sessionId}`);
-    sessions.set(sessionId, createAgent());
+    agent = new ElderCareAgent(await getMcp(), ownerId);
+    sessions.set(sessionId, agent);
   }
-
-  return sessions.get(sessionId)!;
+  return agent;
 }
 
+/** Identity comes only from a verified JWT — never from the request body. */
 function extractAuthContext(req: Request): AuthContext | undefined {
   const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.slice(7);
-    const secret = process.env['JWT_SECRET'];
-    if (secret) {
-      try {
-        const decoded = jwt.verify(token, secret) as {
-          id: string;
-          phone: string;
-          role: 'user' | 'admin';
-        };
-        return { id: decoded.id, phone: decoded.phone, role: decoded.role };
-      } catch {
-        console.warn('[agent] Invalid JWT in Authorization header.');
-      }
-    }
+  const secret = process.env['JWT_SECRET'];
+  if (!authHeader?.startsWith('Bearer ') || !secret) return undefined;
+
+  try {
+    const decoded = jwt.verify(authHeader.slice(7), secret) as {
+      id: string;
+      phone: string;
+      role: 'user' | 'admin';
+    };
+    return { id: decoded.id, phone: decoded.phone, role: decoded.role };
+  } catch {
+    console.warn('[agent] Invalid JWT in Authorization header.');
+    return undefined;
   }
-
-  const { auth, userId, userRole, phone } = req.body as {
-    auth?: AuthContext;
-    userId?: string;
-    userRole?: 'user' | 'admin';
-    phone?: string;
-  };
-
-  if (auth?.id) {
-    return auth;
-  }
-
-  if (userId) {
-    return { id: userId, phone: phone ?? '', role: userRole ?? 'user' };
-  }
-
-  return undefined;
 }
 
 const app = express();
@@ -91,8 +63,8 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     service: '@eldercare/agent',
-    mode: mcpClient ? 'mcp' : 'hardcoded',
-    mcpServer: mcpClient ? config.mcpServerUrl : null,
+    mcpConnected: mcpClient !== null,
+    mcpServer: config.mcpServerUrl,
     sessions: sessions.size,
     timestamp: new Date().toISOString(),
   });
@@ -115,20 +87,26 @@ app.post('/chat', async (req: Request, res: Response) => {
   const sid =
     sessionId?.trim() || `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-  const agent = getOrCreateSession(sid);
   const authContext = extractAuthContext(req);
+  if (!authContext) {
+    res.status(401).json({ success: false, error: 'Please sign in to chat with the assistant.' });
+    return;
+  }
 
-  console.log(`\n[agent] /chat  sessionId=${sid} authUser=${authContext?.id ?? 'none'}`);
+  const agent = await getOrCreateSession(sid, authContext.id);
+  if (agent.ownerId !== authContext.id) {
+    res.status(403).json({ success: false, error: 'This conversation belongs to someone else.' });
+    return;
+  }
+
+  console.log(`\n[agent] /chat  sessionId=${sid} authUser=${authContext.id}`);
   console.log(`[agent] user: ${message}`);
 
-  const reply =
-    'run' in agent && agent instanceof ElderCareAgentMcp
-      ? await agent.run(message, authContext)
-      : await (agent as ElderCareAgent).run(message);
+  const reply = await agent.run(message, authContext);
 
   console.log(`[agent] reply: ${reply}`);
 
-  res.json({ success: true, data: { reply, sessionId: sid, authUser: authContext?.id } });
+  res.json({ success: true, data: { reply, sessionId: sid, authUser: authContext.id } });
 });
 
 app.post('/chat/reset', (req: Request, res: Response) => {
@@ -140,6 +118,11 @@ app.post('/chat/reset', (req: Request, res: Response) => {
   }
 
   const agent = sessions.get(sessionId);
+
+  if (agent && agent.ownerId !== extractAuthContext(req)?.id) {
+    res.status(403).json({ success: false, error: 'This conversation belongs to someone else.' });
+    return;
+  }
 
   if (agent) {
     agent.reset();
@@ -158,6 +141,11 @@ app.get('/chat/history', (req: Request, res: Response) => {
   }
 
   const agent = sessions.get(sessionId);
+
+  if (agent && agent.ownerId !== extractAuthContext(req)?.id) {
+    res.status(403).json({ success: false, error: 'This conversation belongs to someone else.' });
+    return;
+  }
 
   if (!agent) {
     res.status(404).json({ success: false, error: `Session '${sessionId}' not found` });
@@ -187,7 +175,9 @@ process.on('uncaughtException', (err) => {
 });
 
 async function start() {
-  const usingMcp = await initMcp();
+  await getMcp().catch((err) =>
+    console.warn('[agent] MCP not reachable yet — will retry on the first chat:', err),
+  );
 
   const server = app.listen(config.port, () => {
     console.log(`
@@ -199,7 +189,7 @@ async function start() {
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
 
-  Mode:     ${usingMcp ? `MCP  →  ${config.mcpServerUrl}` : 'Hardcoded tools (no MCP_SERVER_URL set)'}
+  Mode:     MCP  →  ${config.mcpServerUrl}
   Server:   http://localhost:${config.port}
   Health:   http://localhost:${config.port}/health
   Chat:     POST http://localhost:${config.port}/chat

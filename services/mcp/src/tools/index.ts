@@ -1,3 +1,7 @@
-export { getElderProfile } from './profile.js';
-export { getFamilyMembers, sendFamilyNotification, getPendingInvites } from './family.js';
-export { getMedicationPreference, getRidePreference } from './preferences.js';
+export { getProfile } from './profile.js';
+export {
+  getFamilyMembers,
+  getPendingInvites,
+  getNotifications,
+  sendFamilyNotification,
+} from './family.js';

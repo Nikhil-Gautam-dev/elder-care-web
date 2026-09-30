@@ -36,10 +36,15 @@ export async function sendChatMessage(
   return body.data;
 }
 
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export async function resetChatSession(sessionId: string): Promise<void> {
   const res = await fetch(`${AGENT_BASE}/chat/reset`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ sessionId }),
   });
 
@@ -50,7 +55,9 @@ export async function resetChatSession(sessionId: string): Promise<void> {
 }
 
 export async function getChatHistory(sessionId: string): Promise<any[]> {
-  const res = await fetch(`${AGENT_BASE}/chat/history?sessionId=${encodeURIComponent(sessionId)}`);
+  const res = await fetch(`${AGENT_BASE}/chat/history?sessionId=${encodeURIComponent(sessionId)}`, {
+    headers: authHeaders(),
+  });
   const body = await res.json();
   if (!res.ok || !body.success) {
     return [];

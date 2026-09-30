@@ -6,6 +6,7 @@ let db: Db;
 export const USERS_COLLECTION = 'users';
 export const OTPS_COLLECTION = 'otps';
 export const FAMILY_INVITES_COLLECTION = 'family_invites';
+export const NOTIFICATIONS_COLLECTION = 'notifications';
 
 export interface UserDoc {
   _id: ObjectId;
@@ -62,6 +63,17 @@ export interface FamilyInviteDoc {
   updatedAt: Date;
 }
 
+export interface NotificationDoc {
+  _id?: ObjectId;
+  recipientId: ObjectId;
+  senderId: ObjectId;
+  senderName: string;
+  aboutUserId: ObjectId;
+  message: string;
+  read: boolean;
+  createdAt: Date;
+}
+
 export async function connectDb(): Promise<void> {
   const uri = process.env.MONGODB_URI ?? 'mongodb://localhost:27017';
   const dbName = process.env.DB_NAME ?? 'eldercare';
@@ -83,6 +95,10 @@ export function getUsersCollection(): Collection<UserDoc> {
 
 export function getFamilyInvitesCollection(): Collection<FamilyInviteDoc> {
   return getDb().collection<FamilyInviteDoc>(FAMILY_INVITES_COLLECTION);
+}
+
+export function getNotificationsCollection(): Collection<NotificationDoc> {
+  return getDb().collection<NotificationDoc>(NOTIFICATIONS_COLLECTION);
 }
 
 export async function closeDb(): Promise<void> {

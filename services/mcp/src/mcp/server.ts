@@ -1,14 +1,15 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import type { AuthContext } from '@eldercare/shared';
 
 import {
-  getElderProfile,
+  getProfile,
   getFamilyMembers,
-  getMedicationPreference,
-  getRidePreference,
-  sendFamilyNotification,
   getPendingInvites,
+  getNotifications,
+  sendFamilyNotification,
 } from '../tools/index.js';
+import type { ToolResult } from '../tools/result.js';
 
 const authSchema = z
   .object({
@@ -16,144 +17,108 @@ const authSchema = z
     phone: z.string().optional(),
     role: z.enum(['user', 'admin']).optional(),
   })
-  .optional();
+  .optional()
+  .describe('Injected by the calling service from the verified login. Never set by the model.');
+
+type RawAuth = z.infer<typeof authSchema>;
+
+const toAuth = (auth: RawAuth): AuthContext | undefined =>
+  auth ? { id: auth.id, phone: auth.phone ?? '', role: auth.role ?? 'user' } : undefined;
+
+const person = z
+  .string()
+  .optional()
+  .describe(
+    'Who this is about: "me" (default), a relationship like "mom" or "son", or a family member\'s name.',
+  );
+
+const reply = (result: ToolResult) => ({
+  content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+  isError: !result.success,
+});
 
 export function createMcpServer(): McpServer {
-  const mcpServer = new McpServer({
-    name: 'eldercare',
-    version: '0.0.1',
-  });
+  const server = new McpServer({ name: 'eldercare', version: '0.0.1' });
 
-  mcpServer.registerTool(
-    'get_elder_profile',
+  const log = (name: string, auth: RawAuth) =>
+    console.log(`[MCP] ${name} auth=${auth?.id ?? 'none'}`);
+
+  server.registerTool(
+    'get_profile',
     {
-      title: 'Get Elder Profile',
+      title: 'Get Profile',
       description:
-        'Get the profile of the current elderly user, including name, age, address, and preferences.',
-      inputSchema: {
-        userId: z
-          .string()
-          .describe(
-            'The user ID or a label like "me", "mom", or "dad". Use "me" if the user is asking about themselves.',
-          ),
-        auth: authSchema,
-      },
+        "Get a person's profile: name, age, contact, address, language, usual pharmacy, preferred ride, accessibility settings. Works for the signed-in user and their linked family members.",
+      inputSchema: { person, auth: authSchema },
     },
-    async ({ userId, auth }) => {
-      console.log(`[MCP] get_elder_profile(${userId}) auth=`, auth?.id ?? 'none');
-      const result = await getElderProfile(
-        userId,
-        auth ? { id: auth.id, phone: auth.phone ?? '', role: auth.role ?? 'user' } : undefined,
-      );
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    async ({ person, auth }) => {
+      log('get_profile', auth);
+      return reply(await getProfile(person, toAuth(auth)));
     },
   );
 
-  mcpServer.registerTool(
+  server.registerTool(
     'get_family_members',
     {
       title: 'Get Family Members',
       description:
-        'List all family members linked to the elderly user — their names, relationship, and permissions.',
-      inputSchema: {
-        userId: z.string().describe('The elder user ID whose family members to list.'),
-        auth: authSchema,
-      },
+        "List a person's linked family members: name, relationship, phone, and what each is allowed to do (notifications, orders, rides).",
+      inputSchema: { person, auth: authSchema },
     },
-    async ({ userId, auth }) => {
-      console.log(`[MCP] get_family_members(${userId}) auth=`, auth?.id ?? 'none');
-      const result = await getFamilyMembers(
-        userId,
-        auth ? { id: auth.id, phone: auth.phone ?? '', role: auth.role ?? 'user' } : undefined,
-      );
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    async ({ person, auth }) => {
+      log('get_family_members', auth);
+      return reply(await getFamilyMembers(person, toAuth(auth)));
     },
   );
 
-  mcpServer.registerTool(
-    'get_medication_preference',
+  server.registerTool(
+    'get_pending_invites',
     {
-      title: 'Get Medication Preference',
+      title: 'Get Pending Invites',
       description:
-        'Get the preferred pharmacy and any usual medication preference for the elder user.',
-      inputSchema: {
-        userId: z.string().describe('The elder user ID.'),
-        auth: authSchema,
-      },
+        'Pending family invitations for the signed-in user: ones they sent and ones sent to them.',
+      inputSchema: { auth: authSchema },
     },
-    async ({ userId, auth }) => {
-      console.log(`[MCP] get_medication_preference(${userId}) auth=`, auth?.id ?? 'none');
-      const result = await getMedicationPreference(
-        userId,
-        auth ? { id: auth.id, phone: auth.phone ?? '', role: auth.role ?? 'user' } : undefined,
-      );
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    async ({ auth }) => {
+      log('get_pending_invites', auth);
+      return reply(await getPendingInvites(toAuth(auth)));
     },
   );
 
-  mcpServer.registerTool(
-    'get_ride_preference',
+  server.registerTool(
+    'get_notifications',
     {
-      title: 'Get Ride Preference',
+      title: 'Get Notifications',
       description:
-        'Get the preferred ride type for the elder user (standard, premium, or accessible).',
+        'Notifications the signed-in user has received from family (most recent first). Marks unread ones as read.',
       inputSchema: {
-        userId: z.string().describe('The elder user ID.'),
+        unreadOnly: z.boolean().optional().describe('Only return unread notifications.'),
         auth: authSchema,
       },
     },
-    async ({ userId, auth }) => {
-      console.log(`[MCP] get_ride_preference(${userId}) auth=`, auth?.id ?? 'none');
-      const result = await getRidePreference(
-        userId,
-        auth ? { id: auth.id, phone: auth.phone ?? '', role: auth.role ?? 'user' } : undefined,
-      );
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    async ({ unreadOnly, auth }) => {
+      log('get_notifications', auth);
+      return reply(await getNotifications(unreadOnly ?? false, toAuth(auth)));
     },
   );
 
-  mcpServer.registerTool(
+  server.registerTool(
     'send_family_notification',
     {
       title: 'Send Family Notification',
       description:
-        'Send a notification message to the family members of the elder. Only sends to members with canReceiveNotifications enabled. Requires explicit user confirmation before calling.',
+        "Send a message to a person's family members who have notifications enabled. Only call after the user has confirmed the exact message.",
       inputSchema: {
-        userId: z.string().describe('The elder user ID whose family will be notified.'),
-        message: z.string().describe('The notification message to send to family members.'),
+        person,
+        message: z.string().min(1).describe('The message to send.'),
         auth: authSchema,
       },
     },
-    async ({ userId, message, auth }) => {
-      console.log(`[MCP] send_family_notification(${userId}, ...) auth=`, auth?.id ?? 'none');
-      const result = await sendFamilyNotification(
-        userId,
-        message,
-        auth ? { id: auth.id, phone: auth.phone ?? '', role: auth.role ?? 'user' } : undefined,
-      );
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    async ({ person, message, auth }) => {
+      log('send_family_notification', auth);
+      return reply(await sendFamilyNotification(person, message, toAuth(auth)));
     },
   );
 
-  mcpServer.registerTool(
-    'get_pending_invites',
-    {
-      title: 'Get Pending Invites',
-      description: 'Check for any pending family invitations sent by or to the elder user.',
-      inputSchema: {
-        userId: z.string().describe('The elder user ID.'),
-        auth: authSchema,
-      },
-    },
-    async ({ userId, auth }) => {
-      console.log(`[MCP] get_pending_invites(${userId}) auth=`, auth?.id ?? 'none');
-      const result = await getPendingInvites(
-        userId,
-        auth ? { id: auth.id, phone: auth.phone ?? '', role: auth.role ?? 'user' } : undefined,
-      );
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-    },
-  );
-
-  return mcpServer;
+  return server;
 }

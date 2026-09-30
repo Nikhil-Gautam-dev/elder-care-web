@@ -1,155 +1,140 @@
-import { resolveTargetUserAndAuth } from '../data/resolver.js';
-import { getUsersCollection, getFamilyInvitesCollection } from '../config/db.js';
 import type { AuthContext } from '@eldercare/shared';
+import {
+  getFamilyInvitesCollection,
+  getNotificationsCollection,
+  getUsersCollection,
+} from '../config/db.js';
+import { authorize, isFailure, type ToolResult } from './result.js';
 
-export interface ToolResult {
-  success: boolean;
-  count?: number;
-  familyMembers?: Record<string, unknown>[];
-  notificationId?: string;
-  message?: string;
-  deliveredTo?: Record<string, unknown>[];
-  pendingInvites?: Record<string, unknown>[];
-  error?: string;
-}
-
-export async function getFamilyMembers(userId: string, auth?: AuthContext): Promise<ToolResult> {
-  const resolved = await resolveTargetUserAndAuth(userId, auth);
-
-  if (resolved.error || !resolved.targetUser) {
-    return {
-      success: false,
-      error: resolved.error ?? `No user found for '${userId}'.`,
-    };
-  }
-
-  if (!resolved.isSelf && !resolved.isAdmin && !resolved.isLinkedFamily) {
-    return {
-      success: false,
-      error: 'Access forbidden: You do not have permission to view family members for this user.',
-    };
-  }
+export async function getFamilyMembers(
+  person: string | undefined,
+  auth?: AuthContext,
+): Promise<ToolResult> {
+  const resolved = await authorize(person, auth, 'self-or-family');
+  if (isFailure(resolved)) return resolved;
 
   const users = getUsersCollection();
-  const members = resolved.targetUser.familyMembers ?? [];
+  const members = await Promise.all(
+    (resolved.targetUser.familyMembers ?? []).map(async (m) => {
+      const linked = await users.findOne({ _id: m.userId });
+      return {
+        name: linked?.name ?? 'Unknown',
+        relationship: m.relationship,
+        phone: linked?.phone,
+        canReceiveNotifications: m.canReceiveNotifications,
+        canManageOrders: m.canManageOrders,
+        canManageRides: m.canManageRides,
+        linkedAt: m.linkedAt,
+      };
+    }),
+  );
 
-  const familyDetails: Record<string, unknown>[] = [];
-  for (const m of members) {
-    const linkedUser = await users.findOne({ _id: m.userId });
-    familyDetails.push({
-      memberId: m.userId.toString(),
-      name: linkedUser?.name ?? 'Unknown User',
-      relationship: m.relationship,
-      phone: linkedUser?.phone ?? 'N/A',
-      canReceiveNotifications: m.canReceiveNotifications,
-      canManageOrders: m.canManageOrders,
-      canManageRides: m.canManageRides,
-      linkedAt: m.linkedAt ?? new Date(),
-    });
+  return { success: true, forName: resolved.targetUser.name, count: members.length, members };
+}
+
+export async function getPendingInvites(auth?: AuthContext): Promise<ToolResult> {
+  const resolved = await authorize('me', auth, 'self-only');
+  if (isFailure(resolved)) return resolved;
+
+  const me = resolved.targetUser;
+  const invites = await getFamilyInvitesCollection()
+    .find({
+      status: 'pending',
+      expiresAt: { $gt: new Date() },
+      $or: [{ inviterId: me._id }, { targetPhone: me.phone }],
+    })
+    .sort({ createdAt: -1 })
+    .toArray();
+
+  const shape = (inv: (typeof invites)[number]) => ({
+    relationship: inv.relationship,
+    expiresAt: inv.expiresAt,
+    sentAt: inv.createdAt,
+    canReceiveNotifications: inv.canReceiveNotifications,
+    canManageOrders: inv.canManageOrders,
+    canManageRides: inv.canManageRides,
+  });
+
+  const sentByMe = invites
+    .filter((i) => i.inviterId.equals(me._id))
+    .map((i) => ({ ...shape(i), sentToPhone: i.targetPhone ?? 'anyone with the invite link' }));
+  const receivedByMe = invites
+    .filter((i) => !i.inviterId.equals(me._id))
+    .map((i) => ({ ...shape(i), fromName: i.inviterName, fromPhone: i.inviterPhone }));
+
+  return { success: true, sentByMe, receivedByMe };
+}
+
+export async function getNotifications(
+  unreadOnly: boolean,
+  auth?: AuthContext,
+): Promise<ToolResult> {
+  const resolved = await authorize('me', auth, 'self-only');
+  if (isFailure(resolved)) return resolved;
+
+  const items = await getNotificationsCollection()
+    .find({ recipientId: resolved.targetUser._id, ...(unreadOnly ? { read: false } : {}) })
+    .sort({ createdAt: -1 })
+    .limit(20)
+    .toArray();
+
+  const unreadIds = items.filter((n) => !n.read).map((n) => n._id);
+  if (unreadIds.length) {
+    await getNotificationsCollection().updateMany(
+      { _id: { $in: unreadIds } },
+      { $set: { read: true } },
+    );
   }
 
   return {
     success: true,
-    count: familyDetails.length,
-    familyMembers: familyDetails,
+    count: items.length,
+    notifications: items.map((n) => ({
+      from: n.senderName,
+      message: n.message,
+      read: n.read,
+      receivedAt: n.createdAt,
+    })),
   };
 }
 
 export async function sendFamilyNotification(
-  userId: string,
+  person: string | undefined,
   message: string,
   auth?: AuthContext,
 ): Promise<ToolResult> {
-  const resolved = await resolveTargetUserAndAuth(userId, auth);
-
-  if (resolved.error || !resolved.targetUser) {
-    return {
-      success: false,
-      error: resolved.error ?? `No user found for '${userId}'.`,
-    };
-  }
-
+  const resolved = await authorize(person, auth, 'self-or-family');
+  if (isFailure(resolved)) return resolved;
   if (!resolved.isSelf && !resolved.isAdmin && !resolved.canReceiveNotifications) {
-    return {
-      success: false,
-      error:
-        'Access forbidden: You do not have notification permission for this user family group.',
-    };
+    return { success: false, error: "You don't have permission to notify this person's family." };
   }
+
+  const sender = resolved.callerUser;
+  if (!sender) return { success: false, error: 'Sender account not found.' };
 
   const users = getUsersCollection();
-  const members = resolved.targetUser.familyMembers ?? [];
-
-  const notified: Record<string, unknown>[] = [];
-  for (const m of members) {
-    if (m.canReceiveNotifications) {
-      const linkedUser = await users.findOne({ _id: m.userId });
-      notified.push({
-        name: linkedUser?.name ?? 'Family Member',
-        relationship: m.relationship,
-        phone: linkedUser?.phone,
-        channel: linkedUser?.preferences?.notificationChannel ?? 'whatsapp',
-      });
-    }
+  const recipients = (resolved.targetUser.familyMembers ?? []).filter(
+    (m) => m.canReceiveNotifications && !m.userId.equals(sender._id),
+  );
+  if (recipients.length === 0) {
+    return { success: false, error: 'No family members are set up to receive notifications.' };
   }
 
-  if (notified.length === 0) {
-    return {
-      success: false,
-      error: 'No family members found with active notification permissions.',
-    };
-  }
+  const now = new Date();
+  await getNotificationsCollection().insertMany(
+    recipients.map((m) => ({
+      recipientId: m.userId,
+      senderId: sender._id,
+      senderName: sender.name,
+      aboutUserId: resolved.targetUser._id,
+      message,
+      read: false,
+      createdAt: now,
+    })),
+  );
 
-  return {
-    success: true,
-    notificationId: `NOTIF-${Math.floor(Math.random() * 100000)}`,
-    message,
-    deliveredTo: notified,
-  };
-}
-
-export async function getPendingInvites(userId: string, auth?: AuthContext): Promise<ToolResult> {
-  const resolved = await resolveTargetUserAndAuth(userId, auth);
-
-  if (resolved.error || !resolved.targetUser) {
-    return {
-      success: false,
-      error: resolved.error ?? `No user found for '${userId}'.`,
-    };
-  }
-
-  if (!resolved.isSelf && !resolved.isAdmin) {
-    return {
-      success: false,
-      error: 'Access forbidden: You can only view your own pending family invitations.',
-    };
-  }
-
-  const invitesColl = getFamilyInvitesCollection();
-  const invites = await invitesColl
-    .find({
-      $or: [{ inviterId: resolved.targetUser._id }, { targetPhone: resolved.targetUser.phone }],
-      status: 'pending',
-    })
-    .toArray();
-
-  const formatted = invites.map((inv) => ({
-    inviteId: inv._id.toString(),
-    inviterName: inv.inviterName,
-    inviterPhone: inv.inviterPhone,
-    targetPhone: inv.targetPhone,
-    relationship: inv.relationship,
-    canReceiveNotifications: inv.canReceiveNotifications,
-    canManageOrders: inv.canManageOrders,
-    canManageRides: inv.canManageRides,
-    status: inv.status,
-    expiresAt: inv.expiresAt,
-  }));
-
-  return {
-    success: true,
-    count: formatted.length,
-    pendingInvites: formatted,
-    message: formatted.length === 0 ? 'No pending family invitations found.' : undefined,
-  };
+  const names = (await users.find({ _id: { $in: recipients.map((m) => m.userId) } }).toArray()).map(
+    (u) => u.name,
+  );
+  return { success: true, deliveredTo: names };
 }
