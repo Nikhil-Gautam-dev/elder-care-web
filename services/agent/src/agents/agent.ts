@@ -3,6 +3,33 @@ import type { ElderCareMcpClient } from '../mcp/client.js';
 import { groq, groqParams, SYSTEM_PROMPT, type ChatMessage } from './base.js';
 
 const MAX_ITERATIONS = 10;
+const MAX_LLM_ATTEMPTS = 4;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Thrown when the language model stays unavailable; the route turns it into a friendly reply. */
+export class LlmUnavailableError extends Error {}
+
+/** Calls Groq, waiting and retrying when it says we're going too fast (HTTP 429). */
+async function completeWithRetry(params: ReturnType<typeof groqParams>) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await groq.chat.completions.create(params);
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status !== 429 && (status === undefined || status < 500)) throw err;
+      if (attempt >= MAX_LLM_ATTEMPTS) throw new LlmUnavailableError('The language model is busy.');
+
+      const retryAfter = Number(
+        (err as { headers?: Record<string, string> }).headers?.['retry-after'],
+      );
+      const waitMs =
+        Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : attempt * 3000;
+      console.warn(`[agent] LLM busy (status ${status}), retrying in ${waitMs}ms`);
+      await sleep(Math.min(waitMs, 15_000));
+    }
+  }
+}
 
 type ToolSchema = { properties?: Record<string, unknown>; required?: string[] } & Record<
   string,
@@ -41,7 +68,7 @@ export class ElderCareAgent {
     const tools = await this.loadTools();
 
     for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
-      const response = await groq.chat.completions.create(groqParams(this.messages, tools));
+      const response = await completeWithRetry(groqParams(this.messages, tools));
       const message = response.choices[0]?.message;
       if (!message) throw new Error('Groq returned an empty response.');
 

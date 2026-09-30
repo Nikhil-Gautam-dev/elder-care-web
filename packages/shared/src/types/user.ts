@@ -1,3 +1,5 @@
+import type { Gender } from "./family.js";
+
 export type FamilyRelationship =
   | "son"
   | "daughter"
@@ -35,16 +37,6 @@ export interface IAccessibility {
   voiceEnabled: boolean;
 }
 
-export interface IFamilyMember {
-  userId: string;
-  relationship: FamilyRelationship;
-  canReceiveNotifications: boolean;
-  canManageOrders: boolean;
-  canManageRides: boolean;
-  inviteId?: string;
-  linkedAt?: Date;
-}
-
 export type InviteStatus =
   "pending" | "accepted" | "rejected" | "cancelled" | "expired";
 
@@ -53,8 +45,10 @@ export interface IFamilyInvite {
   inviterId: string;
   inviterName: string;
   inviterPhone: string;
+  familyId: string;
   targetPhone?: string;
   relationship: FamilyRelationship;
+  isElder: boolean;
   canReceiveNotifications: boolean;
   canManageOrders: boolean;
   canManageRides: boolean;
@@ -62,14 +56,6 @@ export interface IFamilyInvite {
   status: InviteStatus;
   expiresAt: Date;
   createdAt: Date;
-}
-
-export interface CreateInviteBody {
-  targetPhone?: string;
-  relationship: FamilyRelationship;
-  canReceiveNotifications?: boolean;
-  canManageOrders?: boolean;
-  canManageRides?: boolean;
 }
 
 export interface IUser {
@@ -80,7 +66,8 @@ export interface IUser {
   email?: string;
   address?: IAddress;
   preferences: IPreferences;
-  familyMembers: IFamilyMember[];
+  gender?: Gender;
+  familyId?: string;
   accessibility: IAccessibility;
   status: UserStatus;
   createdAt: Date;
@@ -97,19 +84,13 @@ export type CreateUserBody = Omit<
 export type UpdateUserBody = Partial<
   Pick<
     IUser,
-    "name" | "age" | "email" | "address" | "preferences" | "accessibility"
-  >
->;
-
-export type AddFamilyMemberBody = IFamilyMember;
-
-export type UpdateFamilyMemberBody = Partial<
-  Pick<
-    IFamilyMember,
-    | "relationship"
-    | "canReceiveNotifications"
-    | "canManageOrders"
-    | "canManageRides"
+    | "name"
+    | "age"
+    | "gender"
+    | "email"
+    | "address"
+    | "preferences"
+    | "accessibility"
   >
 >;
 

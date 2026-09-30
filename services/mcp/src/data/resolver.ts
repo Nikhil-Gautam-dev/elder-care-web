@@ -1,42 +1,44 @@
 import { ObjectId } from 'mongodb';
-import { getUsersCollection, type UserDoc } from '../config/db.js';
+import { normalizeIndianPhone, relationWordMatches } from '@eldercare/shared';
 import type { AuthContext } from '@eldercare/shared';
+import { getUsersCollection, type FamilyDoc, type UserDoc } from '../config/db.js';
+import {
+  loadFamilyContext,
+  normaliseAlias,
+  type FamilyContext,
+  type FamilyMemberContext,
+} from './family.js';
+
+export interface Candidate {
+  name: string;
+  relationship: string | null;
+}
 
 export interface ResolvedUserResult {
   callerUser: UserDoc | null;
   targetUser: UserDoc | null;
+  family: FamilyDoc | null;
+  /** What the target is to the caller ("father", "cousin"), or 'self'. */
   relationshipWithCaller: string | null;
   isSelf: boolean;
   isAdmin: boolean;
+  /** Caller and target are in the same family. */
   isLinkedFamily: boolean;
   canReceiveNotifications: boolean;
   canManageOrders: boolean;
   canManageRides: boolean;
+  /** Several people matched; the assistant should ask which one. */
+  ambiguous?: Candidate[];
   error?: string;
 }
 
-const RELATION_ALIASES: Record<string, string[]> = {
-  mom: ['mother', 'mom', 'parent'],
-  mother: ['mother', 'mom', 'parent'],
-  dad: ['father', 'dad', 'parent'],
-  father: ['father', 'dad', 'parent'],
-  son: ['son', 'child'],
-  daughter: ['daughter', 'child'],
-  wife: ['spouse'],
-  husband: ['spouse'],
-  brother: ['sibling'],
-  sister: ['sibling'],
-};
+const SELF_WORDS = ['', 'me', 'myself', 'my', 'i'];
 
-function denied(
-  callerUser: UserDoc | null,
-  isAdmin: boolean,
-  error: string,
-  targetUser: UserDoc | null = null,
-): ResolvedUserResult {
+function blank(callerUser: UserDoc | null, isAdmin: boolean): ResolvedUserResult {
   return {
     callerUser,
-    targetUser,
+    targetUser: null,
+    family: null,
     relationshipWithCaller: null,
     isSelf: false,
     isAdmin,
@@ -44,17 +46,24 @@ function denied(
     canReceiveNotifications: false,
     canManageOrders: false,
     canManageRides: false,
-    error,
   };
 }
 
-function selfResult(user: UserDoc, isAdmin: boolean): ResolvedUserResult {
+function denied(callerUser: UserDoc | null, isAdmin: boolean, error: string): ResolvedUserResult {
+  return { ...blank(callerUser, isAdmin), error };
+}
+
+function selfResult(
+  user: UserDoc,
+  isAdmin: boolean,
+  ctx: FamilyContext | null,
+): ResolvedUserResult {
   return {
-    callerUser: user,
+    ...blank(user, isAdmin),
     targetUser: user,
+    family: ctx?.family ?? null,
     relationshipWithCaller: 'self',
     isSelf: true,
-    isAdmin,
     isLinkedFamily: false,
     canReceiveNotifications: true,
     canManageOrders: true,
@@ -63,8 +72,64 @@ function selfResult(user: UserDoc, isAdmin: boolean): ResolvedUserResult {
 }
 
 /**
- * Resolves who a tool call is about ("me", "mom", a family member's name, a user id or phone)
- * and computes what the authenticated caller is allowed to do for that person.
+ * Flags are the *caller's* permissions for the family's elders: ordering/rides only apply
+ * when the target is an elder.
+ */
+function familyResult(
+  caller: UserDoc,
+  isAdmin: boolean,
+  ctx: FamilyContext,
+  target: FamilyMemberContext,
+): ResolvedUserResult {
+  const mine = ctx.viewer.member;
+  return {
+    ...blank(caller, isAdmin),
+    targetUser: target.user,
+    family: ctx.family,
+    relationshipWithCaller: target.derived?.label ?? 'family member',
+    isLinkedFamily: true,
+    canReceiveNotifications: mine.canReceiveNotifications,
+    canManageOrders: isAdmin || (mine.canManageOrders && target.member.isElder),
+    canManageRides: isAdmin || (mine.canManageRides && target.member.isElder),
+  };
+}
+
+const asCandidates = (members: FamilyMemberContext[]): Candidate[] =>
+  members.map((m) => ({ name: m.user.name, relationship: m.derived?.label ?? null }));
+
+/**
+ * Finds who the caller means among their family. Tries, in order: the caller's own aliases
+ * ("Dadu"), relationship words ("mom", "uncle"), then names. The first stage that matches wins;
+ * several matches in that stage means the question is ambiguous.
+ */
+function matchMember(
+  ctx: FamilyContext,
+  identifier: string,
+): { match?: FamilyMemberContext; ambiguous?: FamilyMemberContext[] } {
+  const others = ctx.members.filter((m) => !m.isViewer);
+  const word = normaliseAlias(identifier).replace(/^(my|your)\s+/, '');
+
+  const stages: FamilyMemberContext[][] = [
+    others.filter((m) => m.aliases.some((a) => normaliseAlias(a) === word)),
+    others.filter(
+      (m) =>
+        m.derived &&
+        (m.derived.label === word || relationWordMatches(word, m.derived, m.user.gender)),
+    ),
+    others.filter((m) => m.user.name.toLowerCase() === word),
+    others.filter((m) => m.user.name.toLowerCase().includes(word)),
+  ];
+
+  for (const found of stages) {
+    if (found.length === 1) return { match: found[0] };
+    if (found.length > 1) return { ambiguous: found };
+  }
+  return {};
+}
+
+/**
+ * Resolves who a tool call is about ("me", an alias, "mom", a name, or — for admins — an id/phone)
+ * and what the authenticated caller is allowed to do for that person.
  */
 export async function resolveTargetUserAndAuth(
   targetIdentifier: string | undefined,
@@ -78,65 +143,46 @@ export async function resolveTargetUserAndAuth(
   }
 
   const callerUser = await users.findOne({ _id: new ObjectId(auth.id) });
-  if (!callerUser) {
+  if (!callerUser)
     return denied(null, isAdmin, `Signed-in user account '${auth.id}' was not found.`);
-  }
 
+  const ctx = await loadFamilyContext(callerUser);
   const identifier = (targetIdentifier ?? '').trim();
-  const cleanId = identifier.toLowerCase();
 
-  if (['', 'me', 'myself', 'my', 'i'].includes(cleanId) || identifier === auth.id) {
-    return selfResult(callerUser, isAdmin);
+  if (SELF_WORDS.includes(identifier.toLowerCase()) || identifier === auth.id) {
+    return selfResult(callerUser, isAdmin, ctx);
   }
 
-  // 1. Match among the caller's linked family members (relationship word or name).
-  const relationTerms = RELATION_ALIASES[cleanId] ?? [cleanId];
-  for (const member of callerUser.familyMembers ?? []) {
-    const linked = await users.findOne({ _id: member.userId });
-    if (!linked) continue;
-    const byRelation = relationTerms.includes(member.relationship.toLowerCase());
-    const byName = linked.name.toLowerCase().includes(cleanId);
-    if (byRelation || byName) {
-      // Flags on the member's own list describe what *the caller* may do for them.
-      const reverse = linked.familyMembers?.find((m) => m.userId.equals(callerUser._id));
+  if (ctx) {
+    const { match, ambiguous } = matchMember(ctx, identifier);
+    if (match) return familyResult(callerUser, isAdmin, ctx, match);
+    if (ambiguous) return { ...blank(callerUser, isAdmin), ambiguous: asCandidates(ambiguous) };
+  }
+
+  if (isAdmin) {
+    const byId = ObjectId.isValid(identifier)
+      ? await users.findOne({ _id: new ObjectId(identifier) })
+      : null;
+    const target =
+      byId ?? (await users.findOne({ phone: normalizeIndianPhone(identifier) ?? identifier }));
+    if (target) {
       return {
-        callerUser,
-        targetUser: linked,
-        relationshipWithCaller: member.relationship,
-        isSelf: false,
-        isAdmin,
-        isLinkedFamily: true,
-        canReceiveNotifications: isAdmin || Boolean(reverse?.canReceiveNotifications),
-        canManageOrders: isAdmin || Boolean(reverse?.canManageOrders),
-        canManageRides: isAdmin || Boolean(reverse?.canManageRides),
+        ...blank(callerUser, true),
+        targetUser: target,
+        relationshipWithCaller: target._id.equals(callerUser._id) ? 'self' : null,
+        isSelf: target._id.equals(callerUser._id),
+        canReceiveNotifications: true,
+        canManageOrders: true,
+        canManageRides: true,
       };
     }
   }
 
-  // 2. Fall back to id / phone lookup (only useful for admins or reverse links).
-  let targetUser: UserDoc | null = null;
-  if (ObjectId.isValid(identifier)) {
-    targetUser = await users.findOne({ _id: new ObjectId(identifier) });
-  }
-  targetUser ??= await users.findOne({ phone: identifier });
-
-  if (!targetUser) {
-    return denied(callerUser, isAdmin, `Could not find anyone matching '${identifier}'.`);
-  }
-
-  if (targetUser._id.equals(callerUser._id)) return selfResult(callerUser, isAdmin);
-
-  const inverse = targetUser.familyMembers?.find((m) => m.userId.equals(callerUser._id));
-
-  return {
+  return denied(
     callerUser,
-    targetUser,
-    relationshipWithCaller: inverse?.relationship ?? null,
-    isSelf: false,
     isAdmin,
-    isLinkedFamily: Boolean(inverse),
-    canReceiveNotifications: isAdmin || Boolean(inverse?.canReceiveNotifications),
-    canManageOrders: isAdmin || Boolean(inverse?.canManageOrders),
-    canManageRides: isAdmin || Boolean(inverse?.canManageRides),
-  };
+    ctx
+      ? `Could not find anyone called '${identifier}' in the family.`
+      : `Could not find '${identifier}' — the user is not part of a family yet.`,
+  );
 }

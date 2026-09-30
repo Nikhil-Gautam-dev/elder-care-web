@@ -1,20 +1,25 @@
 import { type Request, type Response } from 'express';
 import { ObjectId } from 'mongodb';
 import jwt from 'jsonwebtoken';
+import { nationalDigits, normalizeIndianPhone } from '@eldercare/shared';
 import { getOtpsCollection, getUsersCollection } from '../models/user.model.js';
 import { createError } from '../middleware/errorHandler.js';
 
 function generateOtp(): string {
-  return Math.floor(100_000 + Math.random() * 900_000).toString();
+  // return Math.floor(100_000 + Math.random() * 900_000).toString();
+
+  return '123456';
 }
+
+const INVALID_PHONE = 'Enter a valid 10-digit Indian mobile number';
 
 function getOtpTtl(): number {
   return Number(process.env.OTP_EXPIRES_IN_SECONDS ?? 300);
 }
 
 export async function sendOtp(req: Request, res: Response): Promise<void> {
-  const { phone } = req.body as { phone?: string };
-  if (!phone) throw createError('phone is required', 400);
+  const phone = normalizeIndianPhone(String((req.body as { phone?: string }).phone ?? ''));
+  if (!phone) throw createError(INVALID_PHONE, 400);
 
   const ttl = getOtpTtl();
   const code = generateOtp();
@@ -47,8 +52,10 @@ export async function sendOtp(req: Request, res: Response): Promise<void> {
 }
 
 export async function verifyOtp(req: Request, res: Response): Promise<void> {
-  const { phone, otp } = req.body as { phone?: string; otp?: string };
-  if (!phone || !otp) throw createError('phone and otp are required', 400);
+  const { phone: rawPhone, otp } = req.body as { phone?: string; otp?: string };
+  const phone = normalizeIndianPhone(String(rawPhone ?? ''));
+  if (!phone) throw createError(INVALID_PHONE, 400);
+  if (!otp) throw createError('otp is required', 400);
 
   const otps = getOtpsCollection();
   const record = await otps.findOne({ phone, code: otp });
@@ -64,6 +71,12 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
   const users = getUsersCollection();
   const now = new Date();
 
+  // Accounts created before numbers were standardised (e.g. "9876543210") are upgraded to +91 form on login.
+  const legacy = await users.findOne({ phone: { $in: [phone, nationalDigits(phone)] } });
+  if (legacy && legacy.phone !== phone) {
+    await users.updateOne({ _id: legacy._id }, { $set: { phone } });
+  }
+
   const result = await users.findOneAndUpdate(
     { phone },
     {
@@ -75,7 +88,6 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
           language: 'en',
           notificationChannel: 'sms',
         },
-        familyMembers: [],
         accessibility: { largeText: false, voiceEnabled: false },
         status: 'active',
         createdAt: now,

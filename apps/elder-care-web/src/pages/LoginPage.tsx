@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, Lock, ArrowRight, HeartHandshake } from 'lucide-react';
+import { Lock, ArrowRight, HeartHandshake } from 'lucide-react';
+import { COUNTRY_CODE, PHONE_DIGITS, formatIndianPhone } from '@eldercare/shared';
 import { sendOtp, verifyOtp } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { PhoneInput } from '../components/PhoneInput';
 
 export const LoginPage: React.FC = () => {
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
+  // Only the 10 national digits; +91 is added when talking to the API.
   const [phone, setPhone] = useState<string>('');
+  const fullPhone = `${COUNTRY_CODE}${phone}`;
   const [otp, setOtp] = useState<string>('');
   const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -17,11 +21,14 @@ export const LoginPage: React.FC = () => {
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!phone.trim()) return;
+    if (phone.length !== PHONE_DIGITS) {
+      setError(`Please enter your ${PHONE_DIGITS}-digit mobile number`);
+      return;
+    }
     setError(null);
     setLoading(true);
     try {
-      const res = await sendOtp(phone.trim());
+      const res = await sendOtp(fullPhone);
       if (res.otp) {
         setDevOtpHint(res.otp);
       }
@@ -39,7 +46,7 @@ export const LoginPage: React.FC = () => {
     setError(null);
     setLoading(true);
     try {
-      const res = await verifyOtp(phone.trim(), otp.trim());
+      const res = await verifyOtp(fullPhone, otp.trim());
       await setAuthData(res.token, res.user.id);
       navigate('/');
     } catch (err: any) {
@@ -74,7 +81,7 @@ export const LoginPage: React.FC = () => {
         <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>
           {step === 'phone'
             ? 'Sign in or register with your phone number'
-            : `Enter the 6-digit code sent to ${phone}`}
+            : `Enter the 6-digit code sent to ${formatIndianPhone(fullPhone)}`}
         </p>
 
         {error && (
@@ -115,35 +122,14 @@ export const LoginPage: React.FC = () => {
               <label className="form-label" htmlFor="phone-input">
                 Phone Number
               </label>
-              <div style={{ position: 'relative' }}>
-                <Phone
-                  size={18}
-                  style={{
-                    position: 'absolute',
-                    left: '12px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    color: 'var(--text-muted)',
-                  }}
-                />
-                <input
-                  id="phone-input"
-                  type="tel"
-                  className="input-field"
-                  style={{ paddingLeft: '2.5rem' }}
-                  placeholder="+1 (555) 000-0000"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  required
-                />
-              </div>
+              <PhoneInput id="phone-input" value={phone} onChange={setPhone} required autoFocus />
             </div>
 
             <button
               type="submit"
               className="btn btn-primary btn-large"
               style={{ width: '100%', marginTop: '1rem' }}
-              disabled={loading}
+              disabled={loading || phone.length !== PHONE_DIGITS}
             >
               <span>{loading ? 'Sending Code...' : 'Get Verification Code'}</span>
               <ArrowRight size={18} />

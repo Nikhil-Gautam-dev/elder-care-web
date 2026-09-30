@@ -7,9 +7,24 @@ import {
   listUserInvites,
   rejectInvite,
 } from '../controllers/familyInvite.controller.js';
+import {
+  deleteAlias,
+  getMyFamily,
+  removeMember,
+  renameFamily,
+  setAlias,
+  updateMember,
+} from '../controllers/family.controller.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router: IRouter = Router();
+
+router.get('/', authenticate, getMyFamily);
+router.patch('/', authenticate, renameFamily);
+router.patch('/members/:userId', authenticate, updateMember);
+router.delete('/members/:userId', authenticate, removeMember);
+router.put('/aliases', authenticate, setAlias);
+router.delete('/aliases/:id', authenticate, deleteAlias);
 
 router.post('/invites', authenticate, createInvite);
 router.get('/invites', authenticate, listUserInvites);

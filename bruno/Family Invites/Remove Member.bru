@@ -1,0 +1,15 @@
+meta {
+  name: Remove Member or Leave
+  type: http
+  seq: 9
+}
+
+delete {
+  url: {{baseUrl}}/family/members/{{memberId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}

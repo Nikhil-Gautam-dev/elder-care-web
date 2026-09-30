@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, Type, Volume2, Save, CheckCircle } from 'lucide-react';
-import type { NotificationChannel, RidePreference } from '@eldercare/shared';
+import type { Gender, NotificationChannel, RidePreference } from '@eldercare/shared';
+import { formatIndianPhone } from '@eldercare/shared';
 import { useAuth } from '../context/AuthContext';
 import { updateUserProfile } from '../services/api';
 
@@ -9,6 +10,7 @@ export const ProfilePage: React.FC = () => {
 
   const [name, setName] = useState<string>(user?.name || '');
   const [age, setAge] = useState<number | undefined>(user?.age);
+  const [gender, setGender] = useState<Gender | ''>(user?.gender ?? '');
   const [email, setEmail] = useState<string>(user?.email || '');
   const [city, setCity] = useState<string>(user?.address?.city || '');
   const [state, setState] = useState<string>(user?.address?.state || '');
@@ -39,6 +41,7 @@ export const ProfilePage: React.FC = () => {
       await updateUserProfile(userId, {
         name,
         age: age ? Number(age) : undefined,
+        gender: gender || undefined,
         email: email || undefined,
         address: {
           city,
@@ -129,7 +132,7 @@ export const ProfilePage: React.FC = () => {
               id="phone-display"
               type="text"
               className="input-field"
-              value={user?.phone || ''}
+              value={formatIndianPhone(user?.phone)}
               disabled
               style={{ background: 'var(--bg-color)' }}
             />
@@ -163,6 +166,23 @@ export const ProfilePage: React.FC = () => {
                 value={age || ''}
                 onChange={(e) => setAge(e.target.value ? Number(e.target.value) : undefined)}
               />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="gender-select">
+                Gender (Optional)
+              </label>
+              <select
+                id="gender-select"
+                className="input-field"
+                value={gender}
+                onChange={(e) => setGender(e.target.value as Gender | '')}
+              >
+                <option value="">Prefer not to say</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
             </div>
           </div>
 

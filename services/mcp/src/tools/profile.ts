@@ -1,4 +1,4 @@
-import type { AuthContext } from '@eldercare/shared';
+import { formatIndianPhone, type AuthContext } from '@eldercare/shared';
 import { authorize, isFailure, type ToolResult } from './result.js';
 
 export async function getProfile(
@@ -12,11 +12,12 @@ export async function getProfile(
   return {
     success: true,
     isSelf: resolved.isSelf,
-    relationshipToCaller: resolved.relationshipWithCaller,
+    relationshipToCaller: resolved.isSelf ? null : resolved.relationshipWithCaller,
     profile: {
       name: u.name,
       age: u.age,
-      phone: u.phone,
+      gender: u.gender,
+      phone: formatIndianPhone(u.phone),
       email: u.email,
       address: u.address,
       language: u.preferences?.language,

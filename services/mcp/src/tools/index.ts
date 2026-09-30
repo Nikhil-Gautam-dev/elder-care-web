@@ -4,4 +4,5 @@ export {
   getPendingInvites,
   getNotifications,
   sendFamilyNotification,
+  setAlias,
 } from './family.js';

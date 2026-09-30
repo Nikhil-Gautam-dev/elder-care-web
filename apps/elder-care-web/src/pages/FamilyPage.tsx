@@ -1,19 +1,33 @@
 import React, { useEffect, useState } from 'react';
-import { Users, UserPlus, Copy, Check, Shield, AlertCircle } from 'lucide-react';
-import type { FamilyRelationship } from '@eldercare/shared';
+import { Users, UserPlus, Copy, Check, Shield, AlertCircle, X, LogOut } from 'lucide-react';
+import {
+  COUNTRY_CODE,
+  PHONE_DIGITS,
+  formatIndianPhone,
+  type FamilyMemberView,
+  type FamilyRelationship,
+  type FamilyView,
+} from '@eldercare/shared';
 import {
   acceptFamilyInvite,
   cancelFamilyInvite,
   createFamilyInvite,
-  getFamilyMembers,
+  deleteFamilyAlias,
+  getMyFamily,
   listFamilyInvites,
   rejectFamilyInvite,
+  removeFamilyMember,
+  setFamilyAlias,
+  updateFamilyMember,
 } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { PhoneInput } from '../components/PhoneInput';
 
 export const FamilyPage: React.FC = () => {
   const { userId } = useAuth();
-  const [members, setMembers] = useState<any[]>([]);
+  const [family, setFamily] = useState<FamilyView | null>(null);
+  const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
+  const [isElder, setIsElder] = useState<boolean>(false);
   const [sentInvites, setSentInvites] = useState<any[]>([]);
   const [receivedInvites, setReceivedInvites] = useState<any[]>([]);
 
@@ -33,11 +47,8 @@ export const FamilyPage: React.FC = () => {
   const loadData = async () => {
     if (!userId) return;
     try {
-      const [membersData, invitesData] = await Promise.all([
-        getFamilyMembers(userId),
-        listFamilyInvites(),
-      ]);
-      setMembers(membersData);
+      const [familyData, invitesData] = await Promise.all([getMyFamily(), listFamilyInvites()]);
+      setFamily(familyData);
       setSentInvites(invitesData.sent || []);
       setReceivedInvites(invitesData.received || []);
     } catch (err: any) {
@@ -53,11 +64,16 @@ export const FamilyPage: React.FC = () => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
+    if (targetPhone && targetPhone.length !== PHONE_DIGITS) {
+      setError(`Phone number must be exactly ${PHONE_DIGITS} digits`);
+      return;
+    }
     setLoading(true);
     try {
       const res = await createFamilyInvite({
-        targetPhone: targetPhone.trim() || undefined,
+        targetPhone: targetPhone ? `${COUNTRY_CODE}${targetPhone}` : undefined,
         relationship,
+        isElder,
         canReceiveNotifications,
         canManageOrders,
         canManageRides,
@@ -107,6 +123,36 @@ export const FamilyPage: React.FC = () => {
     } catch (err: any) {
       setError(err.message || 'Failed to cancel invite');
     }
+  };
+
+  const run = async (action: () => Promise<unknown>, done?: string) => {
+    setError(null);
+    setSuccess(null);
+    try {
+      await action();
+      if (done) setSuccess(done);
+      await loadData();
+    } catch (err: any) {
+      setError(err.message || 'Something went wrong');
+    }
+  };
+
+  const handleAddAlias = (member: FamilyMemberView) => {
+    const alias = (aliasDrafts[member.userId] ?? '').trim();
+    if (!alias) return;
+    setAliasDrafts((d) => ({ ...d, [member.userId]: '' }));
+    run(() => setFamilyAlias({ targetId: member.userId, alias }));
+  };
+
+  const handleLeave = () => {
+    if (!userId || !window.confirm('Leave this family? You will need a new invite to rejoin.'))
+      return;
+    run(() => removeFamilyMember(userId), 'You left the family.');
+  };
+
+  const handleRemove = (member: FamilyMemberView) => {
+    if (!window.confirm(`Remove ${member.name} from the family?`)) return;
+    run(() => removeFamilyMember(member.userId), `${member.name} was removed.`);
   };
 
   const handleCopyCode = (code: string) => {
@@ -168,45 +214,192 @@ export const FamilyPage: React.FC = () => {
           }}
         >
           <Users size={20} style={{ color: 'var(--primary)' }} />
-          <span>Connected Family Members ({members.length})</span>
+          <span>{family ? family.name : 'Your family'}</span>
         </h2>
 
-        {members.length === 0 ? (
+        {!family || family.members.length <= 1 ? (
           <p style={{ color: 'var(--text-secondary)', padding: '1rem 0' }}>
-            No family members connected yet. Invite a family member below!
+            No family members connected yet. Invite someone below — everyone you invite becomes part
+            of one shared family, and they can invite others too.
           </p>
         ) : (
           <div style={{ display: 'grid', gap: '1rem' }}>
-            {members.map((m: any) => (
-              <div
-                key={m.userId}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '1rem',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--bg-color)',
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>
-                    {m.user?.name || 'Family Member'}
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                    {m.user?.phone} &bull;{' '}
-                    <span style={{ textTransform: 'capitalize' }}>{m.relationship}</span>
-                  </div>
-                </div>
+            {family.members.map((m) => {
+              const iAmAdmin = family.members.some((x) => x.isMe && x.isAdmin);
+              return (
+                <div
+                  key={m.userId}
+                  style={{
+                    padding: '1rem',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-color)',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '1rem',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>
+                        {m.name || 'Family Member'} {m.isMe && '(You)'}
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                        {formatIndianPhone(m.phone)}
+                        {!m.isMe && (
+                          <>
+                            {' '}
+                            &bull;{' '}
+                            <span style={{ textTransform: 'capitalize' }}>
+                              {m.relationship ? `Your ${m.relationship}` : 'Family member'}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
 
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  {m.canManageOrders && <span className="badge badge-success">Orders</span>}
-                  {m.canManageRides && <span className="badge badge-success">Rides</span>}
-                  {m.canReceiveNotifications && <span className="badge badge-warning">Alerts</span>}
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      {m.isElder && <span className="badge badge-warning">Elder</span>}
+                      {m.isAdmin && <span className="badge badge-success">Admin</span>}
+                      {m.canManageOrders && <span className="badge badge-success">Orders</span>}
+                      {m.canManageRides && <span className="badge badge-success">Rides</span>}
+                      {m.canReceiveNotifications && (
+                        <span className="badge badge-warning">Alerts</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {!m.isMe && (
+                    <div style={{ marginTop: '0.75rem' }}>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        What you call them (only you see this)
+                      </div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: '0.5rem',
+                          flexWrap: 'wrap',
+                          alignItems: 'center',
+                          marginTop: '0.35rem',
+                        }}
+                      >
+                        {m.aliases.map((a) => (
+                          <span key={a.id} className="badge badge-success">
+                            {a.alias}
+                            <button
+                              type="button"
+                              aria-label={`Remove ${a.alias}`}
+                              onClick={() => run(() => deleteFamilyAlias(a.id))}
+                              style={{
+                                marginLeft: '0.35rem',
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ))}
+                        <input
+                          className="input-field"
+                          style={{ width: '10rem', padding: '0.3rem 0.5rem' }}
+                          placeholder="Add a nickname (Mom, Dadu…)"
+                          value={aliasDrafts[m.userId] ?? ''}
+                          maxLength={40}
+                          onChange={(e) =>
+                            setAliasDrafts((d) => ({ ...d, [m.userId]: e.target.value }))
+                          }
+                          onKeyDown={(e) => e.key === 'Enter' && handleAddAlias(m)}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ padding: '0.3rem 0.75rem', fontSize: '0.85rem' }}
+                          onClick={() => handleAddAlias(m)}
+                        >
+                          Add
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: '0.5rem',
+                      flexWrap: 'wrap',
+                      marginTop: '0.75rem',
+                    }}
+                  >
+                    {iAmAdmin && (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                          onClick={() =>
+                            run(() => updateFamilyMember(m.userId, { isElder: !m.isElder }))
+                          }
+                        >
+                          {m.isElder ? 'Not an elder' : 'Mark as elder'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                          onClick={() =>
+                            run(() => updateFamilyMember(m.userId, { isAdmin: !m.isAdmin }))
+                          }
+                        >
+                          {m.isAdmin ? 'Remove admin' : 'Make admin'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                          onClick={() =>
+                            run(() =>
+                              updateFamilyMember(m.userId, {
+                                canReceiveNotifications: !m.canReceiveNotifications,
+                              }),
+                            )
+                          }
+                        >
+                          {m.canReceiveNotifications ? 'Mute alerts' : 'Enable alerts'}
+                        </button>
+                      </>
+                    )}
+                    {m.isMe ? (
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                        onClick={handleLeave}
+                      >
+                        <LogOut size={14} /> Leave family
+                      </button>
+                    ) : (
+                      iAmAdmin && (
+                        <button
+                          type="button"
+                          className="btn btn-danger"
+                          style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                          onClick={() => handleRemove(m)}
+                        >
+                          Remove
+                        </button>
+                      )
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -224,27 +417,20 @@ export const FamilyPage: React.FC = () => {
             }}
           >
             <UserPlus size={20} style={{ color: 'var(--primary)' }} />
-            <span>Invite a Caregiver</span>
+            <span>Invite to your family</span>
           </h2>
 
           <form onSubmit={handleCreateInvite}>
             <div className="form-group">
               <label className="form-label" htmlFor="target-phone">
-                Target Phone Number (Optional)
+                Their Mobile Number (Optional — only they can accept)
               </label>
-              <input
-                id="target-phone"
-                type="tel"
-                className="input-field"
-                placeholder="e.g. +1 (555) 123-4567"
-                value={targetPhone}
-                onChange={(e) => setTargetPhone(e.target.value)}
-              />
+              <PhoneInput id="target-phone" value={targetPhone} onChange={setTargetPhone} />
             </div>
 
             <div className="form-group">
               <label className="form-label" htmlFor="rel-select">
-                Relationship
+                They are my… (relationship to me)
               </label>
               <select
                 id="rel-select"
@@ -254,6 +440,7 @@ export const FamilyPage: React.FC = () => {
               >
                 <option value="son">Son</option>
                 <option value="daughter">Daughter</option>
+                <option value="child">Child</option>
                 <option value="spouse">Spouse</option>
                 <option value="parent">Parent</option>
                 <option value="sibling">Sibling</option>
@@ -267,6 +454,16 @@ export const FamilyPage: React.FC = () => {
               style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
             >
               <label className="form-label">Permissions</label>
+              <label
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isElder}
+                  onChange={(e) => setIsElder(e.target.checked)}
+                />
+                <span>This person is an elder who needs care</span>
+              </label>
               <label
                 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}
               >
@@ -409,7 +606,7 @@ export const FamilyPage: React.FC = () => {
                     }}
                   >
                     <div style={{ fontWeight: 600 }}>
-                      From: {inv.inviterName} ({inv.inviterPhone})
+                      From: {inv.inviterName} ({formatIndianPhone(inv.inviterPhone)})
                     </div>
                     <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                       Relationship: {inv.relationship}
@@ -467,7 +664,8 @@ export const FamilyPage: React.FC = () => {
                   >
                     <div>
                       <div>
-                        Role: {inv.relationship} {inv.targetPhone ? `(${inv.targetPhone})` : ''}
+                        Role: {inv.relationship}{' '}
+                        {inv.targetPhone ? `(${formatIndianPhone(inv.targetPhone)})` : ''}
                       </div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                         Status: {inv.status}

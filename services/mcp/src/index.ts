@@ -79,6 +79,7 @@ async function start(): Promise<void> {
     - get_pending_invites
     - get_notifications
     - send_family_notification
+    - set_alias
 `);
   });
 }

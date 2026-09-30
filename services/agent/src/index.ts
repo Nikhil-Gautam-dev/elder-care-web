@@ -4,7 +4,7 @@ import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 
-import { ElderCareAgent } from './agents/index.js';
+import { ElderCareAgent, LlmUnavailableError } from './agents/index.js';
 import { ElderCareMcpClient } from './mcp/client.js';
 import { config, validateConfig } from './config.js';
 import type { AuthContext } from '@eldercare/shared';
@@ -102,7 +102,17 @@ app.post('/chat', async (req: Request, res: Response) => {
   console.log(`\n[agent] /chat  sessionId=${sid} authUser=${authContext.id}`);
   console.log(`[agent] user: ${message}`);
 
-  const reply = await agent.run(message, authContext);
+  let reply: string;
+  try {
+    reply = await agent.run(message, authContext);
+  } catch (err) {
+    if (!(err instanceof LlmUnavailableError)) throw err;
+    res.status(503).json({
+      success: false,
+      error: "I'm a little busy right now. Please try again in a moment.",
+    });
+    return;
+  }
 
   console.log(`[agent] reply: ${reply}`);
 

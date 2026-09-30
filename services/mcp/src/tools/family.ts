@@ -1,68 +1,82 @@
-import type { AuthContext } from '@eldercare/shared';
+import { formatIndianPhone, type AuthContext } from '@eldercare/shared';
 import {
+  getFamilyAliasesCollection,
   getFamilyInvitesCollection,
   getNotificationsCollection,
-  getUsersCollection,
 } from '../config/db.js';
-import { authorize, isFailure, type ToolResult } from './result.js';
+import { loadFamilyContext, normaliseAlias } from '../data/family.js';
+import { authorize, fail, isFailure, type ToolResult } from './result.js';
 
-export async function getFamilyMembers(
-  person: string | undefined,
-  auth?: AuthContext,
-): Promise<ToolResult> {
-  const resolved = await authorize(person, auth, 'self-or-family');
+const MAX_ALIAS_LENGTH = 40;
+
+/** The whole family as the caller sees it: who each person is to them, aliases, roles and permissions. */
+export async function getFamilyMembers(auth?: AuthContext): Promise<ToolResult> {
+  const resolved = await authorize('me', auth, 'self-only');
   if (isFailure(resolved)) return resolved;
 
-  const users = getUsersCollection();
-  const members = await Promise.all(
-    (resolved.targetUser.familyMembers ?? []).map(async (m) => {
-      const linked = await users.findOne({ _id: m.userId });
-      return {
-        name: linked?.name ?? 'Unknown',
-        relationship: m.relationship,
-        phone: linked?.phone,
-        canReceiveNotifications: m.canReceiveNotifications,
-        canManageOrders: m.canManageOrders,
-        canManageRides: m.canManageRides,
-        linkedAt: m.linkedAt,
-      };
-    }),
-  );
+  const ctx = await loadFamilyContext(resolved.callerUser);
+  if (!ctx) return { success: true, inFamily: false, count: 0, members: [] };
 
-  return { success: true, forName: resolved.targetUser.name, count: members.length, members };
+  const members = ctx.members
+    .filter((m) => !m.isViewer)
+    .map((m) => ({
+      name: m.user.name,
+      isToYou: m.derived?.label ?? 'family member',
+      youCallThem: m.aliases,
+      phone: formatIndianPhone(m.user.phone),
+      age: m.user.age,
+      isElder: m.member.isElder,
+      isFamilyAdmin: m.member.isAdmin,
+      canReceiveNotifications: m.member.canReceiveNotifications,
+      canManageOrders: m.member.canManageOrders,
+      canManageRides: m.member.canManageRides,
+      joinedAt: m.member.joinedAt,
+    }));
+
+  return {
+    success: true,
+    inFamily: true,
+    familyName: ctx.family.name,
+    youAreFamilyAdmin: ctx.viewer.member.isAdmin,
+    youAreElder: ctx.viewer.member.isElder,
+    count: members.length,
+    members,
+  };
 }
 
+/** Pending invites: ones my family has sent (by anyone) and ones addressed to my phone. */
 export async function getPendingInvites(auth?: AuthContext): Promise<ToolResult> {
   const resolved = await authorize('me', auth, 'self-only');
   if (isFailure(resolved)) return resolved;
 
-  const me = resolved.targetUser;
+  const me = resolved.callerUser;
   const invites = await getFamilyInvitesCollection()
     .find({
       status: 'pending',
       expiresAt: { $gt: new Date() },
-      $or: [{ inviterId: me._id }, { targetPhone: me.phone }],
+      $or: [...(me.familyId ? [{ familyId: me.familyId }] : []), { targetPhone: me.phone }],
     })
     .sort({ createdAt: -1 })
     .toArray();
 
   const shape = (inv: (typeof invites)[number]) => ({
-    relationship: inv.relationship,
+    invitedBy: inv.inviterId.equals(me._id) ? 'you' : inv.inviterName,
+    theyWouldBeToInviter: inv.relationship,
     expiresAt: inv.expiresAt,
     sentAt: inv.createdAt,
-    canReceiveNotifications: inv.canReceiveNotifications,
-    canManageOrders: inv.canManageOrders,
-    canManageRides: inv.canManageRides,
   });
 
-  const sentByMe = invites
-    .filter((i) => i.inviterId.equals(me._id))
-    .map((i) => ({ ...shape(i), sentToPhone: i.targetPhone ?? 'anyone with the invite link' }));
   const receivedByMe = invites
-    .filter((i) => !i.inviterId.equals(me._id))
-    .map((i) => ({ ...shape(i), fromName: i.inviterName, fromPhone: i.inviterPhone }));
+    .filter((i) => i.targetPhone === me.phone && !i.inviterId.equals(me._id))
+    .map((i) => ({ ...shape(i), fromPhone: formatIndianPhone(i.inviterPhone) }));
+  const sentByMyFamily = invites
+    .filter((i) => me.familyId && i.familyId.equals(me.familyId))
+    .map((i) => ({
+      ...shape(i),
+      sentToPhone: i.targetPhone ? formatIndianPhone(i.targetPhone) : 'anyone with the invite link',
+    }));
 
-  return { success: true, sentByMe, receivedByMe };
+  return { success: true, sentByMyFamily, receivedByMe };
 }
 
 export async function getNotifications(
@@ -98,43 +112,69 @@ export async function getNotifications(
   };
 }
 
+/** Notifies everyone in the caller's family who has notifications switched on (except the caller). */
 export async function sendFamilyNotification(
-  person: string | undefined,
   message: string,
   auth?: AuthContext,
 ): Promise<ToolResult> {
-  const resolved = await authorize(person, auth, 'self-or-family');
+  const resolved = await authorize('me', auth, 'self-only');
   if (isFailure(resolved)) return resolved;
-  if (!resolved.isSelf && !resolved.isAdmin && !resolved.canReceiveNotifications) {
-    return { success: false, error: "You don't have permission to notify this person's family." };
-  }
 
   const sender = resolved.callerUser;
-  if (!sender) return { success: false, error: 'Sender account not found.' };
+  const ctx = await loadFamilyContext(sender);
+  if (!ctx) return fail('You are not part of a family yet, so there is nobody to notify.');
 
-  const users = getUsersCollection();
-  const recipients = (resolved.targetUser.familyMembers ?? []).filter(
-    (m) => m.canReceiveNotifications && !m.userId.equals(sender._id),
-  );
+  const recipients = ctx.members.filter((m) => !m.isViewer && m.member.canReceiveNotifications);
   if (recipients.length === 0) {
-    return { success: false, error: 'No family members are set up to receive notifications.' };
+    return fail('No family members are set up to receive notifications.');
   }
 
   const now = new Date();
   await getNotificationsCollection().insertMany(
     recipients.map((m) => ({
-      recipientId: m.userId,
+      recipientId: m.user._id,
       senderId: sender._id,
       senderName: sender.name,
-      aboutUserId: resolved.targetUser._id,
+      aboutUserId: sender._id,
       message,
       read: false,
       createdAt: now,
     })),
   );
 
-  const names = (await users.find({ _id: { $in: recipients.map((m) => m.userId) } }).toArray()).map(
-    (u) => u.name,
+  return { success: true, deliveredTo: recipients.map((m) => m.user.name) };
+}
+
+/** Saves a private nickname the caller uses for someone in their family ("Dadu", "beta"). */
+export async function setAlias(
+  person: string,
+  alias: string,
+  auth?: AuthContext,
+): Promise<ToolResult> {
+  const resolved = await authorize(person, auth, 'self-or-family');
+  if (isFailure(resolved)) return resolved;
+  if (resolved.isSelf) return fail('An alias is for someone else in the family, not for yourself.');
+  if (!resolved.family) return fail('You are not part of a family yet.');
+
+  const name = alias.trim();
+  if (!name || name.length > MAX_ALIAS_LENGTH) {
+    return fail(`The alias must be between 1 and ${MAX_ALIAS_LENGTH} characters.`);
+  }
+
+  const aliasNorm = normaliseAlias(name);
+  await getFamilyAliasesCollection().updateOne(
+    { ownerId: resolved.callerUser._id, targetId: resolved.targetUser._id, aliasNorm },
+    {
+      $set: { alias: name },
+      $setOnInsert: {
+        familyId: resolved.family._id,
+        ownerId: resolved.callerUser._id,
+        targetId: resolved.targetUser._id,
+        aliasNorm,
+      },
+    },
+    { upsert: true },
   );
-  return { success: true, deliveredTo: names };
+
+  return { success: true, person: resolved.targetUser.name, alias: name };
 }

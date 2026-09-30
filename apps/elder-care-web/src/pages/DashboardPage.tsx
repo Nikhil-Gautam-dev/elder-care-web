@@ -1,10 +1,19 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { MessageSquare, Users, ArrowRight, ShieldCheck, Heart } from 'lucide-react';
+import { formatIndianPhone } from '@eldercare/shared';
 import { useAuth } from '../context/AuthContext';
+import { getMyFamily } from '../services/api';
 
 export const DashboardPage: React.FC = () => {
   const { user } = useAuth();
+  const [familyCount, setFamilyCount] = useState<number>(0);
+
+  useEffect(() => {
+    getMyFamily()
+      .then((family) => setFamilyCount(family ? family.members.length - 1 : 0))
+      .catch(() => setFamilyCount(0));
+  }, []);
 
   return (
     <div>
@@ -115,7 +124,9 @@ export const DashboardPage: React.FC = () => {
             }}
           >
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Phone Number</div>
-            <div style={{ fontWeight: 600, marginTop: '0.25rem' }}>{user?.phone || 'Not set'}</div>
+            <div style={{ fontWeight: 600, marginTop: '0.25rem' }}>
+              {formatIndianPhone(user?.phone) || 'Not set'}
+            </div>
           </div>
           <div
             style={{
@@ -139,9 +150,7 @@ export const DashboardPage: React.FC = () => {
             <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
               Family Members Linked
             </div>
-            <div style={{ fontWeight: 600, marginTop: '0.25rem' }}>
-              {user?.familyMembers?.length || 0} Connected
-            </div>
+            <div style={{ fontWeight: 600, marginTop: '0.25rem' }}>{familyCount} Connected</div>
           </div>
         </div>
       </div>

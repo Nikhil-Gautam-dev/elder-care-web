@@ -1,4 +1,11 @@
-import type { CreateInviteBody, IUser, UpdateUserBody } from '@eldercare/shared';
+import type {
+  CreateInviteBody,
+  FamilyView,
+  IUser,
+  SetAliasBody,
+  UpdateMemberBody,
+  UpdateUserBody,
+} from '@eldercare/shared';
 
 const API_BASE = '/api';
 
@@ -73,8 +80,30 @@ export async function updateUserProfile(id: string, updates: UpdateUserBody): Pr
   });
 }
 
-export async function getFamilyMembers(userId: string): Promise<any[]> {
-  return request<any[]>(`/users/${userId}/family`);
+/** The user's family (null when they are not in one yet). */
+export async function getMyFamily(): Promise<FamilyView | null> {
+  return request<FamilyView | null>('/family');
+}
+
+export async function renameFamily(name: string): Promise<void> {
+  await request('/family', { method: 'PATCH', body: JSON.stringify({ name }) });
+}
+
+export async function updateFamilyMember(userId: string, body: UpdateMemberBody): Promise<void> {
+  await request(`/family/members/${userId}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** Removes a member (admin) or leaves the family (when `userId` is the caller). */
+export async function removeFamilyMember(userId: string): Promise<void> {
+  await request(`/family/members/${userId}`, { method: 'DELETE' });
+}
+
+export async function setFamilyAlias(body: SetAliasBody): Promise<void> {
+  await request('/family/aliases', { method: 'PUT', body: JSON.stringify(body) });
+}
+
+export async function deleteFamilyAlias(aliasId: string): Promise<void> {
+  await request(`/family/aliases/${aliasId}`, { method: 'DELETE' });
 }
 
 export async function createFamilyInvite(
