@@ -153,6 +153,11 @@ export async function resolveTargetUserAndAuth(
     return selfResult(callerUser, isAdmin, ctx);
   }
 
+  if (ctx && ObjectId.isValid(identifier)) {
+    const byId = ctx.members.find((m) => !m.isViewer && m.user._id.toString() === identifier);
+    if (byId) return familyResult(callerUser, isAdmin, ctx, byId);
+  }
+
   if (ctx) {
     const { match, ambiguous } = matchMember(ctx, identifier);
     if (match) return familyResult(callerUser, isAdmin, ctx, match);

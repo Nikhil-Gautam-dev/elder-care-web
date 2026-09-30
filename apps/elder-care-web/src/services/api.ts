@@ -1,5 +1,9 @@
 import type {
   CreateInviteBody,
+  CreateMedicationBody,
+  IMedicationView,
+  IPharmacyOrder,
+  UpdateMedicationBody,
   FamilyView,
   IUser,
   SetAliasBody,
@@ -135,4 +139,38 @@ export async function cancelFamilyInvite(token: string): Promise<{ message: stri
   return request<{ message: string }>(`/family/invites/${token}/cancel`, {
     method: 'POST',
   });
+}
+
+export async function listMedications(
+  elderId?: string,
+  includeStopped = false,
+): Promise<{ items: IMedicationView[]; canManage: boolean }> {
+  const params = new URLSearchParams();
+  if (elderId) params.set('elderId', elderId);
+  if (includeStopped) params.set('includeStopped', 'true');
+  return request<{ items: IMedicationView[]; canManage: boolean }>(`/medications?${params}`);
+}
+
+export async function createMedication(body: CreateMedicationBody): Promise<IMedicationView> {
+  return request<IMedicationView>('/medications', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function updateMedication(
+  id: string,
+  body: UpdateMedicationBody,
+): Promise<IMedicationView> {
+  return request<IMedicationView>(`/medications/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function stopMedication(id: string): Promise<void> {
+  await request(`/medications/${id}`, { method: 'DELETE' });
+}
+
+export async function listPharmacyOrders(elderId?: string): Promise<IPharmacyOrder[]> {
+  const params = elderId ? `?elderId=${encodeURIComponent(elderId)}` : '';
+  const data = await request<{ items: IPharmacyOrder[] }>(`/pharmacy-orders${params}`);
+  return data.items;
 }

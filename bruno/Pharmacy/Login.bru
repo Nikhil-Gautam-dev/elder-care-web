@@ -1,0 +1,23 @@
+meta {
+  name: Pharmacist Login
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{pharmacyUrl}}/auth/login
+  body: json
+  auth: none
+}
+body:json {
+  {
+    "username": "pharmacist",
+    "password": "{{pharmacyPassword}}"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.data && res.body.data.token) {
+    bru.setVar("pharmacyToken", res.body.data.token);
+  }
+}

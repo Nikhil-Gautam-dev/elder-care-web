@@ -1,0 +1,33 @@
+meta {
+  name: Place Order (API key)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{pharmacyUrl}}/orders
+  body: json
+  auth: none
+}
+headers {
+  X-API-Key: {{pharmacyApiKey}}
+}
+
+body:json {
+  {
+    "customer": {
+      "name": "Sunita Sharma",
+      "phone": "9876543210",
+      "address": { "line1": "14 Green Valley Road", "city": "Chandigarh", "postalCode": "160001" }
+    },
+    "items": [{ "catalogItemId": "{{catalogItemId}}", "packs": 2 }],
+    "idempotencyKey": "demo-order-1",
+    "externalRef": { "elderId": "demo" }
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.data) {
+    bru.setVar("pharmacyOrderId", res.body.data.id);
+  }
+}

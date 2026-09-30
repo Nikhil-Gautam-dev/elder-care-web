@@ -1,0 +1,14 @@
+meta {
+  name: List Medications
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/medications
+  body: none
+  auth: bearer
+}
+auth:bearer {
+  token: {{authToken}}
+}

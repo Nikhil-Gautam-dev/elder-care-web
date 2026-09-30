@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { HeartHandshake, MessageSquare, Users, User, LogOut, Type } from 'lucide-react';
+import { HeartHandshake, MessageSquare, Users, User, LogOut, Type, Pill } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export const Navbar: React.FC = () => {
@@ -43,6 +43,13 @@ export const Navbar: React.FC = () => {
             >
               <MessageSquare size={18} />
               <span>Care Assistant</span>
+            </NavLink>
+            <NavLink
+              to="/medications"
+              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+            >
+              <Pill size={18} />
+              <span>Medicines</span>
             </NavLink>
             <NavLink
               to="/family"

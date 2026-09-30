@@ -1,4 +1,4 @@
-export { getProfile } from './profile.js';
+export { getProfile, setAddress } from './profile.js';
 export {
   getFamilyMembers,
   getPendingInvites,
@@ -6,3 +6,17 @@ export {
   sendFamilyNotification,
   setAlias,
 } from './family.js';
+export {
+  listMedications,
+  addMedication,
+  updateMedication,
+  stopMedication,
+  type MedicationArgs,
+} from './medications.js';
+export {
+  searchMedicine,
+  prepareOrder,
+  placeOrder,
+  getOrderStatus,
+  cancelOrder,
+} from './pharmacy.js';

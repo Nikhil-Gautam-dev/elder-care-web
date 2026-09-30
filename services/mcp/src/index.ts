@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 import { createMcpServer } from './mcp/server.js';
-import { connectDb, closeDb } from './config/db.js';
+import { connectDb, closeDb, ensureMcpIndexes } from './config/db.js';
 
 const mcpServer = createMcpServer();
 const PORT = Number(process.env['PORT'] ?? 3003);
@@ -57,6 +57,7 @@ const httpServer = createServer(async (req, res) => {
 async function start(): Promise<void> {
   try {
     await connectDb();
+    await ensureMcpIndexes();
   } catch (err) {
     console.warn('[MCP] DB connection warning:', err);
   }
@@ -79,7 +80,9 @@ async function start(): Promise<void> {
     - get_pending_invites
     - get_notifications
     - send_family_notification
-    - set_alias
+    - set_alias / set_address
+    - list_medications / save_medication / stop_medication
+    - search_medicine / prepare_order / place_order / get_order_status / cancel_order
 `);
   });
 }

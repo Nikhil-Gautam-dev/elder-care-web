@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { User, Type, Volume2, Save, CheckCircle } from 'lucide-react';
-import type { Gender, NotificationChannel, RidePreference } from '@eldercare/shared';
+import {
+  PIN_DIGITS,
+  isValidPinCode,
+  type Gender,
+  type NotificationChannel,
+  type RidePreference,
+} from '@eldercare/shared';
 import { formatIndianPhone } from '@eldercare/shared';
 import { useAuth } from '../context/AuthContext';
 import { updateUserProfile } from '../services/api';
@@ -12,8 +18,11 @@ export const ProfilePage: React.FC = () => {
   const [age, setAge] = useState<number | undefined>(user?.age);
   const [gender, setGender] = useState<Gender | ''>(user?.gender ?? '');
   const [email, setEmail] = useState<string>(user?.email || '');
+  const [line1, setLine1] = useState<string>(user?.address?.line1 || '');
+  const [line2, setLine2] = useState<string>(user?.address?.line2 || '');
   const [city, setCity] = useState<string>(user?.address?.city || '');
   const [state, setState] = useState<string>(user?.address?.state || '');
+  const [postalCode, setPostalCode] = useState<string>(user?.address?.postalCode || '');
 
   const [language, setLanguage] = useState<string>(user?.preferences?.language || 'en');
   const [notificationChannel, setNotificationChannel] = useState<NotificationChannel>(
@@ -36,6 +45,10 @@ export const ProfilePage: React.FC = () => {
     if (!userId) return;
     setError(null);
     setSuccess(false);
+    if (postalCode && !isValidPinCode(postalCode)) {
+      setError(`PIN code must be exactly ${PIN_DIGITS} digits`);
+      return;
+    }
     setLoading(true);
     try {
       await updateUserProfile(userId, {
@@ -44,10 +57,15 @@ export const ProfilePage: React.FC = () => {
         gender: gender || undefined,
         email: email || undefined,
         address: {
-          city,
-          state,
+          ...user?.address,
+          line1: line1.trim(),
+          line2: line2.trim(),
+          city: city.trim(),
+          state: state.trim(),
+          postalCode: postalCode.trim(),
         },
         preferences: {
+          ...user?.preferences,
           language,
           notificationChannel,
           preferredRide,
@@ -200,6 +218,38 @@ export const ProfilePage: React.FC = () => {
             />
           </div>
 
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: '1rem 0 0.5rem' }}>
+            Home address (used for medicine delivery)
+          </h3>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="line1-input">
+              House number and street
+            </label>
+            <input
+              id="line1-input"
+              type="text"
+              className="input-field"
+              placeholder="e.g. House No 23, Ambika City"
+              value={line1}
+              onChange={(e) => setLine1(e.target.value)}
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="line2-input">
+              Area / landmark (optional)
+            </label>
+            <input
+              id="line2-input"
+              type="text"
+              className="input-field"
+              placeholder="e.g. Near the park"
+              value={line2}
+              onChange={(e) => setLine2(e.target.value)}
+            />
+          </div>
+
           <div className="grid-2">
             <div className="form-group">
               <label className="form-label" htmlFor="city-input">
@@ -209,7 +259,7 @@ export const ProfilePage: React.FC = () => {
                 id="city-input"
                 type="text"
                 className="input-field"
-                placeholder="e.g. San Francisco"
+                placeholder="e.g. Chandigarh"
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
               />
@@ -217,15 +267,33 @@ export const ProfilePage: React.FC = () => {
 
             <div className="form-group">
               <label className="form-label" htmlFor="state-input">
-                State / Region
+                State
               </label>
               <input
                 id="state-input"
                 type="text"
                 className="input-field"
-                placeholder="e.g. CA"
+                placeholder="e.g. Punjab"
                 value={state}
                 onChange={(e) => setState(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="pin-input">
+                PIN code
+              </label>
+              <input
+                id="pin-input"
+                type="text"
+                inputMode="numeric"
+                className="input-field"
+                placeholder="e.g. 160001"
+                maxLength={PIN_DIGITS}
+                value={postalCode}
+                onChange={(e) =>
+                  setPostalCode(e.target.value.replace(/\D/g, '').slice(0, PIN_DIGITS))
+                }
               />
             </div>
           </div>

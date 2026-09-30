@@ -8,7 +8,7 @@ A pnpm monorepo powering the ElderCare platform — apps, services, and shared p
 ElderCare/
 ├── apps/
 │   ├── elder-care-web/      # Main elder care web app
-│   ├── pharmacy-web/        # Pharmacy portal
+│   ├── pharmacy-web/        # Pharmacy portal (pharmacist orders + stock)
 │   └── rides-web/           # Rides booking app
 ├── packages/
 │   ├── config/
@@ -19,6 +19,7 @@ ElderCare/
 ├── services/
 │   ├── agent/               # @eldercare/agent — AI agent service
 │   ├── api/                 # @eldercare/api — REST API
+│   ├── pharmacy-api/        # @eldercare/pharmacy-api — independent pharmacy service
 │   └── mcp/                 # @eldercare/mcp — MCP server
 └── docs/                    # Documentation
 ```

@@ -1,0 +1,14 @@
+meta {
+  name: Search Catalog (API key)
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{pharmacyUrl}}/catalog/search?q=metformin
+  body: none
+  auth: none
+}
+headers {
+  X-API-Key: {{pharmacyApiKey}}
+}

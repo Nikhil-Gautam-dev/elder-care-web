@@ -1,0 +1,25 @@
+meta {
+  name: Add Medication
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/medications
+  body: json
+  auth: bearer
+}
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "name": "Metformin",
+    "strength": "500 mg",
+    "form": "tablet",
+    "dose": { "amount": 1, "unit": "tablet" },
+    "schedule": { "slots": ["morning", "night"], "food": "after" },
+    "supply": { "unitsPerPack": 20, "unitsRemaining": 10, "refillThresholdDays": 5 }
+  }
+}

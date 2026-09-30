@@ -1,7 +1,7 @@
 import { type Request, type Response } from 'express';
 import { ObjectId } from 'mongodb';
 import { type UpdateUserBody, type UserStatus } from '@eldercare/shared';
-import { normalizeIndianPhone } from '@eldercare/shared';
+import { isValidPinCode, normalizeIndianPhone } from '@eldercare/shared';
 import { getUsersCollection, type UserDoc } from '../models/user.model.js';
 import { createError } from '../middleware/errorHandler.js';
 
@@ -121,6 +121,10 @@ export async function updateUser(req: Request, res: Response): Promise<void> {
 
   if (body.gender !== undefined && !['male', 'female', 'other'].includes(body.gender)) {
     throw createError('gender must be male, female or other', 400);
+  }
+
+  if (body.address?.postalCode && !isValidPinCode(body.address.postalCode)) {
+    throw createError('PIN code must be exactly 6 digits', 400);
   }
 
   const $set: Record<string, unknown> = { updatedAt: new Date() };

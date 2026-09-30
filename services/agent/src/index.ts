@@ -4,12 +4,15 @@ import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 
-import { ElderCareAgent, LlmUnavailableError } from './agents/index.js';
+import { ElderCareAgent } from './agents/index.js';
+import { createLlmProvider, LlmUnavailableError } from './llm/index.js';
 import { ElderCareMcpClient } from './mcp/client.js';
 import { config, validateConfig } from './config.js';
 import type { AuthContext } from '@eldercare/shared';
 
 validateConfig();
+
+const llm = createLlmProvider(config.llm);
 
 const sessions = new Map<string, ElderCareAgent>();
 
@@ -29,7 +32,7 @@ async function getOrCreateSession(sessionId: string, ownerId: string): Promise<E
   let agent = sessions.get(sessionId);
   if (!agent) {
     console.log(`[agent] New session created: ${sessionId}`);
-    agent = new ElderCareAgent(await getMcp(), ownerId);
+    agent = new ElderCareAgent(await getMcp(), ownerId, llm);
     sessions.set(sessionId, agent);
   }
   return agent;
@@ -63,6 +66,7 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     service: '@eldercare/agent',
+    llm: { provider: llm.name, model: llm.model },
     mcpConnected: mcpClient !== null,
     mcpServer: config.mcpServerUrl,
     sessions: sessions.size,
@@ -195,10 +199,11 @@ async function start() {
 ║                                                            ║
 ║              E L D E R C A R E   A G E N T                 ║
 ║                                                            ║
-║      AI agent service powered by Groq + MCP tools          ║
+║         AI agent service — LLM + MCP tools                 ║
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
 
+  LLM:      ${llm.name} (${llm.model})
   Mode:     MCP  →  ${config.mcpServerUrl}
   Server:   http://localhost:${config.port}
   Health:   http://localhost:${config.port}/health

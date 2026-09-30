@@ -1,0 +1,14 @@
+meta {
+  name: Pharmacy Orders
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/pharmacy-orders
+  body: none
+  auth: bearer
+}
+auth:bearer {
+  token: {{authToken}}
+}
