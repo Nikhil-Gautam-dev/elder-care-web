@@ -8,6 +8,7 @@ import {
 } from '@eldercare/shared';
 import { getUsersCollection, type UserDoc } from '../models/user.model.js';
 import { createError } from '../middleware/errorHandler.js';
+import { getReciprocalRelationship } from './familyInvite.controller.js';
 
 function toObjectId(id: string): ObjectId {
   try {
@@ -244,6 +245,14 @@ export async function updateFamilyMember(req: Request, res: Response): Promise<v
   );
 
   if (!result) throw createError('User or family member not found', 404);
+
+  if (body.relationship !== undefined) {
+    const reciprocal = getReciprocalRelationship(body.relationship);
+    await users.updateOne(
+      { _id: memberObjectId, 'familyMembers.userId': _id },
+      { $set: { 'familyMembers.$.relationship': reciprocal, updatedAt: new Date() } },
+    );
+  }
 
   const updated = result.familyMembers.find((m) => m.userId.equals(memberObjectId));
 

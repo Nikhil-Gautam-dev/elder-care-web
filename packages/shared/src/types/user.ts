@@ -1,5 +1,12 @@
 export type FamilyRelationship =
-  "son" | "daughter" | "spouse" | "parent" | "sibling" | "caregiver" | "other";
+  | "son"
+  | "daughter"
+  | "child"
+  | "spouse"
+  | "parent"
+  | "sibling"
+  | "caregiver"
+  | "other";
 
 export type NotificationChannel = "app" | "sms" | "whatsapp" | "email";
 

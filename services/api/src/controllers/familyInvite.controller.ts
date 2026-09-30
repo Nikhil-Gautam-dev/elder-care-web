@@ -5,17 +5,20 @@ import type { CreateInviteBody, FamilyRelationship } from '@eldercare/shared';
 import { createError } from '../middleware/errorHandler.js';
 import { getFamilyInvitesCollection, getUsersCollection } from '../models/user.model.js';
 
-function getReciprocalRelationship(rel: FamilyRelationship): FamilyRelationship {
+export function getReciprocalRelationship(rel: FamilyRelationship): FamilyRelationship {
   switch (rel) {
     case 'son':
     case 'daughter':
+    case 'child':
       return 'parent';
     case 'parent':
-      return 'other';
+      return 'child';
     case 'spouse':
       return 'spouse';
     case 'sibling':
       return 'sibling';
+    case 'caregiver':
+      return 'other';
     default:
       return 'other';
   }
