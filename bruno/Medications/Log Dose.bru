@@ -1,0 +1,20 @@
+meta {
+  name: Log Dose Taken
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/medications/{{medicationId}}/doses
+  body: json
+  auth: bearer
+}
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "requestId": "demo-dose-1"
+  }
+}

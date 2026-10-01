@@ -3,7 +3,6 @@ import {
   deliveryAddressGaps,
   formatAddress,
   formatIndianPhone,
-  medicationSupplyStatus,
   normalizeIndianPhone,
   packsForDays,
   type AuthContext,
@@ -377,17 +376,11 @@ async function applySupplies(order: PharmacyOrderDoc): Promise<void> {
   const now = new Date();
   for (const line of order.items) {
     if (!line.medicationId) continue;
-    const med = await meds.findOne({ _id: line.medicationId });
-    if (!med) continue;
-    const unitsLeft = medicationSupplyStatus(med, now).unitsLeft;
     await meds.updateOne(
-      { _id: med._id },
+      { _id: line.medicationId },
       {
-        $set: {
-          'supply.unitsRemaining': unitsLeft + line.packs * line.packSize,
-          'supply.asOf': now,
-          updatedAt: now,
-        },
+        $inc: { 'supply.unitsRemaining': line.packs * line.packSize },
+        $set: { updatedAt: now },
       },
     );
   }

@@ -17,7 +17,9 @@ import {
   getMyFamily,
   listMedications,
   listPharmacyOrders,
+  logDose,
   stopMedication,
+  undoLastDose,
   updateMedication,
 } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -104,6 +106,9 @@ export const MedicationsPage: React.FC = () => {
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  /** Medicine whose dose is being logged/undone, and the one just logged (offers Undo). */
+  const [taking, setTaking] = useState<string | null>(null);
+  const [undoable, setUndoable] = useState<string | null>(null);
 
   // People whose medicines I can look after: myself, plus the family's elders.
   const people = useMemo(() => {
@@ -243,12 +248,51 @@ export const MedicationsPage: React.FC = () => {
     }
   };
 
+  const replaceMedication = (updated: IMedicationView) =>
+    setMedications((list) => list.map((x) => (x._id === updated._id ? updated : x)));
+
+  const handleTake = async (m: IMedicationView) => {
+    setError(null);
+    setSuccess(null);
+    setTaking(m._id);
+    try {
+      const { medication } = await logDose(m._id, { requestId: crypto.randomUUID() });
+      replaceMedication(medication);
+      setSuccess(
+        `Marked ${m.name} as taken. ${medication.supplyStatus.unitsLeft} ${m.dose.unit} left.`,
+      );
+      setUndoable(m._id);
+    } catch (err: any) {
+      setError(err.message || 'Could not mark the dose as taken');
+    } finally {
+      setTaking(null);
+    }
+  };
+
+  const handleUndo = async (m: IMedicationView) => {
+    setError(null);
+    setSuccess(null);
+    setTaking(m._id);
+    try {
+      const { medication } = await undoLastDose(m._id);
+      replaceMedication(medication);
+      setSuccess(
+        `Undid the last ${m.name} dose. ${medication.supplyStatus.unitsLeft} ${m.dose.unit} left.`,
+      );
+      setUndoable(null);
+    } catch (err: any) {
+      setError(err.message || 'Could not undo the dose');
+    } finally {
+      setTaking(null);
+    }
+  };
+
   const supplyBadge = (m: IMedicationView) => {
     const { daysLeft, needsRefill, unitsLeft } = m.supplyStatus;
-    if (daysLeft === null)
-      return unitsLeft > 0 ? `${Math.round(unitsLeft)} on hand` : 'None on hand';
-    if (daysLeft <= 0) return 'Finished';
-    return `${daysLeft} day${daysLeft === 1 ? '' : 's'} left${needsRefill ? ' — running low' : ''}`;
+    if (unitsLeft <= 0) return 'None left';
+    const count = `${unitsLeft} left`;
+    if (daysLeft === null) return count;
+    return `${count} (about ${daysLeft} day${daysLeft === 1 ? '' : 's'})${needsRefill ? ' — running low' : ''}`;
   };
 
   return (
@@ -406,6 +450,26 @@ export const MedicationsPage: React.FC = () => {
 
                 {canManage && (
                   <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                      disabled={taking === m._id || m.supplyStatus.unitsLeft < m.dose.amount}
+                      onClick={() => handleTake(m)}
+                    >
+                      Mark taken
+                    </button>
+                    {undoable === m._id && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
+                        disabled={taking === m._id}
+                        onClick={() => handleUndo(m)}
+                      >
+                        Undo
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="btn btn-secondary"

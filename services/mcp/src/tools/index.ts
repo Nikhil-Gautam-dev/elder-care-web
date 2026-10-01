@@ -11,6 +11,8 @@ export {
   addMedication,
   updateMedication,
   stopMedication,
+  logDose,
+  undoLastDose,
   type MedicationArgs,
 } from './medications.js';
 export {

@@ -60,8 +60,11 @@ export {
   type PharmacyOrderStatus,
   type IPharmacyOrder,
   type IPharmacyOrderItem,
+  type IDoseLog,
+  type LogDoseBody,
 } from "./types/medication.js";
 export {
+  applyDose,
   intakesPerDay,
   medicationSupplyStatus,
   packsForDays,

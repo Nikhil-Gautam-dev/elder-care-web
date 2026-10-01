@@ -6,15 +6,19 @@ import {
   medicationSupplyStatus,
   mergeMedication,
   validateMedicationInput,
+  type IDoseLog,
   type IMedicationView,
+  type LogDoseBody,
   type MedicationFields,
 } from '@eldercare/shared';
 import { createError } from '../middleware/errorHandler.js';
 import {
+  getDoseLogsCollection,
   getFamiliesCollection,
   getMedicationsCollection,
   getPharmacyOrdersCollection,
   getUsersCollection,
+  type DoseLogDoc,
   type MedicationDoc,
   type PharmacyOrderDoc,
 } from '../models/user.model.js';
@@ -68,7 +72,7 @@ async function accessTo(
   };
 }
 
-const asView = (doc: MedicationDoc, now = new Date()): IMedicationView => {
+const asView = (doc: MedicationDoc): IMedicationView => {
   const medication = {
     ...doc,
     _id: doc._id.toString(),
@@ -77,7 +81,7 @@ const asView = (doc: MedicationDoc, now = new Date()): IMedicationView => {
   };
   return {
     ...medication,
-    supplyStatus: medicationSupplyStatus(medication, now),
+    supplyStatus: medicationSupplyStatus(medication),
     summary: describeMedication(medication),
   };
 };
@@ -102,12 +106,11 @@ export async function listMedications(req: Request, res: Response): Promise<void
     .find(filter)
     .sort({ active: -1, name: 1 })
     .toArray();
-  const now = new Date();
 
   const access = await accessTo(caller, elderId);
   res.json({
     success: true,
-    data: { items: docs.map((d) => asView(d, now)), canManage: access.canManage },
+    data: { items: docs.map(asView), canManage: access.canManage },
   });
 }
 
@@ -131,7 +134,7 @@ export async function createMedication(req: Request, res: Response): Promise<voi
   };
 
   await getMedicationsCollection().insertOne(withoutUndefined(doc));
-  res.status(201).json({ success: true, data: asView(doc, now) });
+  res.status(201).json({ success: true, data: asView(doc) });
 }
 
 export async function updateMedication(req: Request, res: Response): Promise<void> {
@@ -156,7 +159,7 @@ export async function updateMedication(req: Request, res: Response): Promise<voi
     { _id },
     { $set: fields, ...(next.endDate ? {} : { $unset: { endDate: '' } }) },
   );
-  res.json({ success: true, data: asView(next, now) });
+  res.json({ success: true, data: asView(next) });
 }
 
 /** "Delete" stops the medicine but keeps the record (history, past orders). */
@@ -177,6 +180,130 @@ export async function stopMedication(req: Request, res: Response): Promise<void>
     { $set: { active: false, endDate: existing.endDate ?? now, updatedAt: now } },
   );
   res.json({ success: true, data: { id: existing._id.toString(), active: false } });
+}
+
+const asDoseView = (doc: DoseLogDoc): IDoseLog => ({
+  ...doc,
+  _id: doc._id.toString(),
+  medicationId: doc.medicationId.toString(),
+  elderId: doc.elderId.toString(),
+  loggedBy: doc.loggedBy.toString(),
+  undoneBy: doc.undoneBy?.toString(),
+});
+
+async function loadMedicationFor(req: Request, need: keyof Access) {
+  const caller = requireCaller(req);
+  const existing = await getMedicationsCollection().findOne({
+    _id: toObjectId(req.params['id'], 'medication ID'),
+  });
+  if (!existing) throw createError('Medication not found', 404);
+  if (!(await accessTo(caller, existing.elderId))[need]) {
+    throw createError(
+      need === 'canView'
+        ? "You don't have access to this person's medicines"
+        : "You don't have permission to log doses for this person",
+      403,
+    );
+  }
+  return { caller, existing };
+}
+
+/** Marks a dose as taken: reduces the units on hand and records who took it and when. */
+export async function logDose(req: Request, res: Response): Promise<void> {
+  const { caller, existing } = await loadMedicationFor(req, 'canManage');
+  const body = (req.body ?? {}) as LogDoseBody;
+  const amount = body.amount === undefined ? existing.dose.amount : Number(body.amount);
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 100) {
+    throw createError('amount must be a number between 0 and 100', 400);
+  }
+  if (body.requestId !== undefined && (typeof body.requestId !== 'string' || !body.requestId)) {
+    throw createError('requestId must be a non-empty string', 400);
+  }
+  if (!existing.active) throw createError('This medicine has been stopped', 409);
+
+  const medications = getMedicationsCollection();
+  const logs = getDoseLogsCollection();
+  const now = new Date();
+
+  // A retried request returns the current state instead of counting the dose twice.
+  if (body.requestId && (await logs.findOne({ requestId: body.requestId }))) {
+    const current = await medications.findOne({ _id: existing._id });
+    res.json({ success: true, data: { medication: asView(current ?? existing), duplicate: true } });
+    return;
+  }
+
+  const updated = await medications.findOneAndUpdate(
+    { _id: existing._id, 'supply.unitsRemaining': { $gte: amount } },
+    { $inc: { 'supply.unitsRemaining': -amount }, $set: { updatedAt: now } },
+    { returnDocument: 'after' },
+  );
+  if (!updated) throw createError('Not enough of this medicine left to log that dose', 409);
+
+  const log: DoseLogDoc = withoutUndefined({
+    _id: new ObjectId(),
+    medicationId: existing._id,
+    elderId: existing.elderId,
+    amount,
+    takenAt: now,
+    loggedBy: caller.id,
+    requestId: body.requestId,
+  });
+  try {
+    await logs.insertOne(log);
+  } catch (err) {
+    // Lost a race with the same requestId: undo our decrement so it isn't counted twice.
+    await medications.updateOne(
+      { _id: existing._id },
+      { $inc: { 'supply.unitsRemaining': amount } },
+    );
+    if ((err as { code?: number }).code === 11000) {
+      const current = await medications.findOne({ _id: existing._id });
+      res.json({
+        success: true,
+        data: { medication: asView(current ?? existing), duplicate: true },
+      });
+      return;
+    }
+    throw err;
+  }
+  res
+    .status(201)
+    .json({ success: true, data: { medication: asView(updated), dose: asDoseView(log) } });
+}
+
+/** Undo the most recent dose (e.g. a mistaken tap): restores the units. */
+export async function undoLastDose(req: Request, res: Response): Promise<void> {
+  const { caller, existing } = await loadMedicationFor(req, 'canManage');
+  const logs = getDoseLogsCollection();
+  const now = new Date();
+
+  const last = await logs.findOneAndUpdate(
+    { medicationId: existing._id, undoneAt: { $exists: false } },
+    { $set: { undoneAt: now, undoneBy: caller.id } },
+    { sort: { takenAt: -1 }, returnDocument: 'after' },
+  );
+  if (!last) throw createError('There is no dose to undo', 404);
+
+  const updated = await getMedicationsCollection().findOneAndUpdate(
+    { _id: existing._id },
+    { $inc: { 'supply.unitsRemaining': last.amount }, $set: { updatedAt: now } },
+    { returnDocument: 'after' },
+  );
+  res.json({
+    success: true,
+    data: { medication: asView(updated ?? existing), dose: asDoseView(last) },
+  });
+}
+
+export async function listDoses(req: Request, res: Response): Promise<void> {
+  const { existing } = await loadMedicationFor(req, 'canView');
+  const limit = Math.min(Math.max(Number(req.query['limit']) || 10, 1), 50);
+  const docs = await getDoseLogsCollection()
+    .find({ medicationId: existing._id, undoneAt: { $exists: false } })
+    .sort({ takenAt: -1 })
+    .limit(limit)
+    .toArray();
+  res.json({ success: true, data: { items: docs.map(asDoseView) } });
 }
 
 const asOrderView = (doc: PharmacyOrderDoc) => ({

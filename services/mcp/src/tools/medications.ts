@@ -11,7 +11,12 @@ import {
   type FoodTiming,
   type MedicationForm,
 } from '@eldercare/shared';
-import { getMedicationsCollection, type MedicationDoc, type UserDoc } from '../config/db.js';
+import {
+  getDoseLogsCollection,
+  getMedicationsCollection,
+  type MedicationDoc,
+  type UserDoc,
+} from '../config/db.js';
 import { authorize, fail, isFailure, type ToolResult } from './result.js';
 import { compact, matchForText } from '../pharmacy/match.js';
 
@@ -76,13 +81,14 @@ export async function findMedication(
   };
 }
 
-const view = (m: MedicationDoc, now: Date) => {
-  const status = medicationSupplyStatus(m, now);
+const view = (m: MedicationDoc) => {
+  const status = medicationSupplyStatus(m);
   return {
     medicine: `${m.name} ${m.strength}`,
     genericName: m.genericName,
     form: m.form,
     howToTake: describeMedication(m),
+    unitsOnHand: status.unitsLeft,
     daysOfSupplyLeft: status.daysLeft,
     runningLow: status.needsRefill,
     prescribedBy: m.prescribedBy,
@@ -102,15 +108,58 @@ export async function listMedications(
     .find({ elderId: resolved.targetUser._id, ...(includeStopped ? {} : { active: true }) })
     .sort({ active: -1, name: 1 })
     .toArray();
-  const now = new Date();
+
+  const history = await doseHistory(meds);
 
   return {
     success: true,
     forName: resolved.isSelf ? 'you' : resolved.targetUser.name,
     count: meds.length,
-    medicines: meds.map((m) => view(m, now)),
+    medicines: meds.map((m) => ({ ...view(m), ...history.get(m._id.toString()) })),
     youCanChangeThese: resolved.canManageOrders,
   };
+}
+
+const IST = 'Asia/Kolkata';
+const istDay = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: IST });
+
+/** "today at 8:15 am" / "yesterday at 9:00 pm" / "3 Oct at 8:00 am" (India time). */
+function describeWhen(taken: Date, now: Date): string {
+  const time = taken
+    .toLocaleTimeString('en-IN', {
+      timeZone: IST,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    })
+    .toLowerCase();
+  const day = istDay(taken);
+  if (day === istDay(now)) return `today at ${time}`;
+  if (day === istDay(new Date(now.getTime() - 24 * 60 * 60 * 1000))) return `yesterday at ${time}`;
+  const date = taken.toLocaleDateString('en-IN', { timeZone: IST, day: 'numeric', month: 'short' });
+  return `${date} at ${time}`;
+}
+
+/** Per medicine: doses logged today (India time) and when the last one was taken. Undone doses don't count. */
+async function doseHistory(meds: MedicationDoc[]) {
+  const out = new Map<string, { dosesTakenToday: number; lastTaken: string }>();
+  if (!meds.length) return out;
+  const now = new Date();
+  const today = istDay(now);
+
+  const logs = await getDoseLogsCollection()
+    .find({ medicationId: { $in: meds.map((m) => m._id) }, undoneAt: { $exists: false } })
+    .sort({ takenAt: -1 })
+    .limit(500)
+    .toArray();
+
+  for (const log of logs) {
+    const key = log.medicationId.toString();
+    const entry = out.get(key) ?? { dosesTakenToday: 0, lastTaken: describeWhen(log.takenAt, now) };
+    if (istDay(log.takenAt) === today) entry.dosesTakenToday += 1;
+    out.set(key, entry);
+  }
+  return out;
 }
 
 export interface MedicationArgs {
@@ -253,7 +302,7 @@ export async function addMedication(
   };
   await meds.insertOne(doc);
 
-  return { success: true, saved: view(doc, now) };
+  return { success: true, saved: view(doc) };
 }
 
 export async function updateMedication(
@@ -283,7 +332,81 @@ export async function updateMedication(
     { $set: dropUndefined({ ...fields, updatedAt: now }) },
   );
 
-  return { success: true, saved: view({ ...merged.value, updatedAt: now }, now) };
+  return { success: true, saved: view({ ...merged.value, updatedAt: now }) };
+}
+
+/** Records a dose as taken and reduces the units on hand. */
+export async function logDose(
+  person: string | undefined,
+  medication: string,
+  amount: number | undefined,
+  auth?: AuthContext,
+): Promise<ToolResult> {
+  const resolved = await authorizeManage(person, auth);
+  if (isFailure(resolved)) return resolved;
+
+  const found = await findMedication(resolved.targetUser, medication);
+  if ('failure' in found) return found.failure;
+  const med = found.match;
+
+  const taken = amount ?? med.dose.amount;
+  if (!Number.isFinite(taken) || taken <= 0 || taken > 100) {
+    return fail('The amount taken must be more than 0.');
+  }
+
+  const now = new Date();
+  const updated = await getMedicationsCollection().findOneAndUpdate(
+    { _id: med._id, 'supply.unitsRemaining': { $gte: taken } },
+    { $inc: { 'supply.unitsRemaining': -taken }, $set: { updatedAt: now } },
+    { returnDocument: 'after' },
+  );
+  if (!updated) {
+    return fail(
+      `Only ${medicationSupplyStatus(med).unitsLeft} ${med.dose.unit} of ${med.name} are recorded as left, so that dose can't be logged. If the count is wrong, update how many they have.`,
+    );
+  }
+  await getDoseLogsCollection().insertOne({
+    _id: new ObjectId(),
+    medicationId: med._id,
+    elderId: med.elderId,
+    amount: taken,
+    takenAt: now,
+    loggedBy: resolved.callerUser._id,
+  });
+
+  return { success: true, taken: `${taken} ${med.dose.unit}`, now: view(updated) };
+}
+
+/** Reverses the most recent logged dose of a medicine (a mistaken "taken"). */
+export async function undoLastDose(
+  person: string | undefined,
+  medication: string,
+  auth?: AuthContext,
+): Promise<ToolResult> {
+  const resolved = await authorizeManage(person, auth);
+  if (isFailure(resolved)) return resolved;
+
+  const found = await findMedication(resolved.targetUser, medication);
+  if ('failure' in found) return found.failure;
+
+  const now = new Date();
+  const last = await getDoseLogsCollection().findOneAndUpdate(
+    { medicationId: found.match._id, undoneAt: { $exists: false } },
+    { $set: { undoneAt: now, undoneBy: resolved.callerUser._id } },
+    { sort: { takenAt: -1 }, returnDocument: 'after' },
+  );
+  if (!last) return fail(`There is no logged dose of ${found.match.name} to undo.`);
+
+  const updated = await getMedicationsCollection().findOneAndUpdate(
+    { _id: found.match._id },
+    { $inc: { 'supply.unitsRemaining': last.amount }, $set: { updatedAt: now } },
+    { returnDocument: 'after' },
+  );
+  return {
+    success: true,
+    undone: `${last.amount} ${found.match.dose.unit}`,
+    now: view(updated ?? found.match),
+  };
 }
 
 export async function stopMedication(

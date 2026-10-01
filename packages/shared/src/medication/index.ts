@@ -9,7 +9,6 @@ import {
   type MedicationSupplyStatus,
 } from "../types/medication.js";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** How many times a day the medicine is taken (0 for "as needed"). */
@@ -18,21 +17,18 @@ export function intakesPerDay(schedule: IMedication["schedule"]): number {
   return schedule.times.length || schedule.slots.length;
 }
 
-/** Computed from stored supply: no background job is needed to keep "days left" current. */
+/**
+ * Units on hand are the stored count (reduced only when a dose is logged, topped up on delivery);
+ * "days left" is an estimate from the schedule.
+ */
 export function medicationSupplyStatus(
   med: Pick<IMedication, "dose" | "schedule" | "supply">,
-  now: Date = new Date(),
 ): MedicationSupplyStatus {
   const perDay = intakesPerDay(med.schedule);
   const dailyUnits = perDay > 0 ? med.dose.amount * perDay : null;
-  const elapsedDays = Math.max(
-    0,
-    (now.getTime() - new Date(med.supply.asOf).getTime()) / DAY_MS,
-  );
-  const used = dailyUnits === null ? 0 : dailyUnits * elapsedDays;
   const unitsLeft = Math.max(
     0,
-    Math.round((med.supply.unitsRemaining - used) * 100) / 100,
+    Math.round(med.supply.unitsRemaining * 100) / 100,
   );
   const daysLeft =
     dailyUnits === null ? null : Math.floor(unitsLeft / dailyUnits);
@@ -46,6 +42,17 @@ export function medicationSupplyStatus(
         ? unitsLeft <= 0
         : daysLeft <= med.supply.refillThresholdDays,
   };
+}
+
+/** Units left after taking `amount` (never below 0). */
+export function applyDose(
+  med: Pick<IMedication, "supply">,
+  amount: number,
+): number {
+  return Math.max(
+    0,
+    Math.round((med.supply.unitsRemaining - amount) * 100) / 100,
+  );
 }
 
 /** Packs to buy to cover `days` of use (at least 1). */

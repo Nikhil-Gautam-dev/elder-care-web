@@ -15,6 +15,8 @@ import {
   addMedication,
   updateMedication,
   stopMedication,
+  logDose,
+  undoLastDose,
   searchMedicine,
   prepareOrder,
   placeOrder,
@@ -49,6 +51,22 @@ const reply = (result: ToolResult) => ({
 
 export function createMcpServer(): McpServer {
   const server = new McpServer({ name: 'eldercare', version: '0.0.1' });
+
+  // The SDK turns a thrown error into a tool error for the model without printing it; log it here.
+  const registerTool = server.registerTool.bind(server) as (
+    name: string,
+    config: unknown,
+    handler: (...args: unknown[]) => Promise<unknown>,
+  ) => unknown;
+  server.registerTool = ((name, config, handler) =>
+    registerTool(name, config, async (...args: unknown[]) => {
+      try {
+        return await (handler as (...a: unknown[]) => Promise<unknown>)(...args);
+      } catch (err) {
+        console.error(`[MCP] ${name} failed:`, err);
+        throw err;
+      }
+    })) as typeof server.registerTool;
 
   const log = (name: string, auth: RawAuth) =>
     console.info(`[MCP] ${name} auth=${auth?.id ?? 'none'}`);
@@ -245,6 +263,46 @@ export function createMcpServer(): McpServer {
     async ({ person, medication, auth }) => {
       log('stop_medication', auth);
       return reply(await stopMedication(person, medication, toAuth(auth)));
+    },
+  );
+
+  server.registerTool(
+    'log_dose',
+    {
+      title: 'Log Dose Taken',
+      description:
+        'Record that a dose of a saved medicine was just taken: reduces the units on hand and returns how many are left. Use when the person says they took (or were given) their medicine.',
+      inputSchema: {
+        person,
+        medication: z.string().describe('Which saved medicine, by name.'),
+        amount: z
+          .number()
+          .optional()
+          .describe('Units taken; omit for the usual dose (e.g. 1 tablet).'),
+        auth: authSchema,
+      },
+    },
+    async ({ person, medication, amount, auth }) => {
+      log('log_dose', auth);
+      return reply(await logDose(person, medication, amount, toAuth(auth)));
+    },
+  );
+
+  server.registerTool(
+    'undo_last_dose',
+    {
+      title: 'Undo Last Dose',
+      description:
+        'Reverse the most recently logged dose of a medicine (a mistaken "taken") and restore the units.',
+      inputSchema: {
+        person,
+        medication: z.string().describe('Which saved medicine, by name.'),
+        auth: authSchema,
+      },
+    },
+    async ({ person, medication, auth }) => {
+      log('undo_last_dose', auth);
+      return reply(await undoLastDose(person, medication, toAuth(auth)));
     },
   );
 

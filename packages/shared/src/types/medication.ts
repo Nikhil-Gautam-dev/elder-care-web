@@ -35,8 +35,9 @@ export interface MedicationSchedule {
 
 export interface MedicationSupply {
   unitsPerPack: number;
-  /** Units (tablets, ml…) on hand as of `asOf`. */
+  /** Units (tablets, ml…) on hand: reduced when a dose is logged, topped up on delivery. */
   unitsRemaining: number;
+  /** When `unitsRemaining` was last set directly (creation or manual correction). */
   asOf: Date;
   /** Order again when this many days of supply are left. */
   refillThresholdDays: number;
@@ -103,6 +104,25 @@ export interface UpdateMedicationBody {
   startDate?: string;
   endDate?: string | null;
   active?: boolean;
+}
+
+/** One recorded intake; reduces `supply.unitsRemaining` by `amount` (restored if undone). */
+export interface IDoseLog {
+  _id: string;
+  medicationId: string;
+  elderId: string;
+  amount: number;
+  takenAt: Date;
+  loggedBy: string;
+  undoneAt?: Date;
+  undoneBy?: string;
+}
+
+export interface LogDoseBody {
+  /** Defaults to the medication's standard dose. */
+  amount?: number;
+  /** Client-generated id so a retried request never double-counts. */
+  requestId?: string;
 }
 
 export type PharmacyOrderStatus =

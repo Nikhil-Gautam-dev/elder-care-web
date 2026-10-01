@@ -13,6 +13,7 @@ export const FAMILY_ALIASES_COLLECTION = 'family_aliases';
 export const MEDICATIONS_COLLECTION = 'medications';
 export const PHARMACY_ORDERS_COLLECTION = 'pharmacy_orders';
 export const ORDER_DRAFTS_COLLECTION = 'pharmacy_order_drafts';
+export const DOSE_LOGS_COLLECTION = 'medication_dose_logs';
 
 export interface UserDoc {
   _id: ObjectId;
@@ -117,6 +118,18 @@ export interface MedicationDoc {
   updatedAt: Date;
 }
 
+export interface DoseLogDoc {
+  _id: ObjectId;
+  medicationId: ObjectId;
+  elderId: ObjectId;
+  amount: number;
+  takenAt: Date;
+  loggedBy: ObjectId;
+  requestId?: string;
+  undoneAt?: Date;
+  undoneBy?: ObjectId;
+}
+
 export interface OrderLine {
   medicationId?: ObjectId;
   catalogItemId: string;
@@ -210,6 +223,9 @@ export function getFamilyAliasesCollection(): Collection<FamilyAliasDoc> {
 export const getMedicationsCollection = (): Collection<MedicationDoc> =>
   getDb().collection<MedicationDoc>(MEDICATIONS_COLLECTION);
 
+export const getDoseLogsCollection = (): Collection<DoseLogDoc> =>
+  getDb().collection<DoseLogDoc>(DOSE_LOGS_COLLECTION);
+
 export const getPharmacyOrdersCollection = (): Collection<PharmacyOrderDoc> =>
   getDb().collection<PharmacyOrderDoc>(PHARMACY_ORDERS_COLLECTION);
 
@@ -218,6 +234,7 @@ export const getOrderDraftsCollection = (): Collection<OrderDraftDoc> =>
 
 export async function ensureMcpIndexes(): Promise<void> {
   await getOrderDraftsCollection().createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+  await getDoseLogsCollection().createIndex({ medicationId: 1, takenAt: -1 });
 }
 
 export async function closeDb(): Promise<void> {

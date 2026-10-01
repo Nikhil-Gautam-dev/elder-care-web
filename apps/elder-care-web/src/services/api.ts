@@ -1,8 +1,10 @@
 import type {
   CreateInviteBody,
   CreateMedicationBody,
+  IDoseLog,
   IMedicationView,
   IPharmacyOrder,
+  LogDoseBody,
   UpdateMedicationBody,
   FamilyView,
   IUser,
@@ -167,6 +169,25 @@ export async function updateMedication(
 
 export async function stopMedication(id: string): Promise<void> {
   await request(`/medications/${id}`, { method: 'DELETE' });
+}
+
+/** Mark a dose as taken. `requestId` makes a retried tap harmless. */
+export async function logDose(
+  id: string,
+  body: LogDoseBody = {},
+): Promise<{ medication: IMedicationView; dose?: IDoseLog; duplicate?: boolean }> {
+  return request(`/medications/${id}/doses`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function undoLastDose(
+  id: string,
+): Promise<{ medication: IMedicationView; dose: IDoseLog }> {
+  return request(`/medications/${id}/doses/last`, { method: 'DELETE' });
+}
+
+export async function listDoses(id: string, limit = 5): Promise<IDoseLog[]> {
+  const data = await request<{ items: IDoseLog[] }>(`/medications/${id}/doses?limit=${limit}`);
+  return data.items;
 }
 
 export async function listPharmacyOrders(elderId?: string): Promise<IPharmacyOrder[]> {

@@ -9,6 +9,7 @@ export const FAMILIES_COLLECTION = 'families';
 export const FAMILY_ALIASES_COLLECTION = 'family_aliases';
 export const MEDICATIONS_COLLECTION = 'medications';
 export const PHARMACY_ORDERS_COLLECTION = 'pharmacy_orders';
+export const DOSE_LOGS_COLLECTION = 'medication_dose_logs';
 
 export interface UserDoc {
   _id: ObjectId;
@@ -128,6 +129,19 @@ export interface MedicationDoc {
   updatedAt: Date;
 }
 
+export interface DoseLogDoc {
+  _id: ObjectId;
+  medicationId: ObjectId;
+  elderId: ObjectId;
+  amount: number;
+  takenAt: Date;
+  loggedBy: ObjectId;
+  /** Client-generated; makes a retried request idempotent. */
+  requestId?: string;
+  undoneAt?: Date;
+  undoneBy?: ObjectId;
+}
+
 export interface PharmacyOrderDoc {
   _id: ObjectId;
   pharmacyOrderId: string;
@@ -177,6 +191,10 @@ export function getMedicationsCollection(): Collection<MedicationDoc> {
   return getDb().collection<MedicationDoc>(MEDICATIONS_COLLECTION);
 }
 
+export function getDoseLogsCollection(): Collection<DoseLogDoc> {
+  return getDb().collection<DoseLogDoc>(DOSE_LOGS_COLLECTION);
+}
+
 export function getPharmacyOrdersCollection(): Collection<PharmacyOrderDoc> {
   return getDb().collection<PharmacyOrderDoc>(PHARMACY_ORDERS_COLLECTION);
 }
@@ -207,6 +225,11 @@ export async function ensureIndexes(): Promise<void> {
   await aliases.createIndex({ familyId: 1 });
 
   await getMedicationsCollection().createIndex({ elderId: 1, active: 1 });
+  await getDoseLogsCollection().createIndex({ medicationId: 1, takenAt: -1 });
+  await getDoseLogsCollection().createIndex(
+    { requestId: 1 },
+    { unique: true, partialFilterExpression: { requestId: { $type: 'string' } } },
+  );
   await getPharmacyOrdersCollection().createIndex({ elderId: 1, createdAt: -1 });
   await getPharmacyOrdersCollection().createIndex({ pharmacyOrderId: 1 }, { unique: true });
 
