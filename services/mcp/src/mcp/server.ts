@@ -51,7 +51,7 @@ export function createMcpServer(): McpServer {
   const server = new McpServer({ name: 'eldercare', version: '0.0.1' });
 
   const log = (name: string, auth: RawAuth) =>
-    console.log(`[MCP] ${name} auth=${auth?.id ?? 'none'}`);
+    console.info(`[MCP] ${name} auth=${auth?.id ?? 'none'}`);
 
   server.registerTool(
     'get_profile',

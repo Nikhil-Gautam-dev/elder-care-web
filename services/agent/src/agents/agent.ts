@@ -60,7 +60,7 @@ export class ElderCareAgent {
       );
 
       if (turn.usage?.inputTokens !== undefined) {
-        console.log(
+        console.info(
           `[agent] ${this.llm.name}/${this.llm.model} tokens in=${turn.usage.inputTokens} out=${turn.usage.outputTokens ?? '?'}`,
         );
       }
@@ -90,7 +90,7 @@ export class ElderCareAgent {
             delete args['auth'];
             if (authContext) args['auth'] = authContext;
 
-            console.log(`[agent] tool ${call.name}`, { ...args, auth: authContext?.id });
+            console.info(`[agent] tool ${call.name}`, { ...args, auth: authContext?.id });
             content = extractText(await this.mcp.callTool(call.name, args));
           } catch (err) {
             console.error(`[agent] tool ${call.name} failed:`, err);

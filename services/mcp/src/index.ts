@@ -63,7 +63,7 @@ async function start(): Promise<void> {
   }
 
   httpServer.listen(PORT, () => {
-    console.log(`
+    console.info(`
 ╔════════════════════════════════════════════════════════════╗
 ║                                                            ║
 ║            E L D E R C A R E   M C P                      ║

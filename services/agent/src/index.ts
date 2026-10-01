@@ -31,7 +31,7 @@ async function getMcp(): Promise<ElderCareMcpClient> {
 async function getOrCreateSession(sessionId: string, ownerId: string): Promise<ElderCareAgent> {
   let agent = sessions.get(sessionId);
   if (!agent) {
-    console.log(`[agent] New session created: ${sessionId}`);
+    console.info(`[agent] New session created: ${sessionId}`);
     agent = new ElderCareAgent(await getMcp(), ownerId, llm);
     sessions.set(sessionId, agent);
   }
@@ -103,8 +103,8 @@ app.post('/chat', async (req: Request, res: Response) => {
     return;
   }
 
-  console.log(`\n[agent] /chat  sessionId=${sid} authUser=${authContext.id}`);
-  console.log(`[agent] user: ${message}`);
+  console.info(`\n[agent] /chat  sessionId=${sid} authUser=${authContext.id}`);
+  console.info(`[agent] user: ${message}`);
 
   let reply: string;
   try {
@@ -118,7 +118,7 @@ app.post('/chat', async (req: Request, res: Response) => {
     return;
   }
 
-  console.log(`[agent] reply: ${reply}`);
+  console.info(`[agent] reply: ${reply}`);
 
   res.json({ success: true, data: { reply, sessionId: sid, authUser: authContext.id } });
 });
@@ -140,7 +140,7 @@ app.post('/chat/reset', (req: Request, res: Response) => {
 
   if (agent) {
     agent.reset();
-    console.log(`[agent] Session reset: ${sessionId}`);
+    console.info(`[agent] Session reset: ${sessionId}`);
   }
 
   res.json({ success: true, data: { message: `Session '${sessionId}' has been reset.` } });
@@ -194,7 +194,7 @@ async function start() {
   );
 
   const server = app.listen(config.port, () => {
-    console.log(`
+    console.info(`
 ╔════════════════════════════════════════════════════════════╗
 ║                                                            ║
 ║              E L D E R C A R E   A G E N T                 ║

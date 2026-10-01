@@ -13,9 +13,9 @@ export class ElderCareMcpClient {
   }
 
   async connect(): Promise<void> {
-    console.log(`[mcp-client] Connecting to ${config.mcpServerUrl}`);
+    console.info(`[mcp-client] Connecting to ${config.mcpServerUrl}`);
     await this.client.connect(this.transport);
-    console.log('[mcp-client] Connected');
+    console.info('[mcp-client] Connected');
   }
 
   async listTools() {
