@@ -58,6 +58,7 @@ export const AssistantPage: React.FC = () => {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [voiceError, setVoiceError] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const AUTO_SEND_SECONDS = 3;
   const pendingTextRef = useRef<string>('');
 
@@ -171,6 +172,56 @@ export const AssistantPage: React.FC = () => {
     localStorage.setItem(VOICE_OUTPUT_KEY, String(next));
     if (!next) stop();
   };
+
+  // Keyboard shortcuts. The ref always holds the latest handlers so the listener is bound once.
+  const shortcutsRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  shortcutsRef.current = (e) => {
+    if (e.key === 'Escape') {
+      if (countdown !== null) cancelCountdown();
+      else if (isListening) stopListening();
+      else if (isSpeaking) stop();
+      return;
+    }
+    const isSendCombo = (e.ctrlKey || e.metaKey) && e.key === 'Enter';
+    if (isSendCombo) {
+      e.preventDefault();
+      cancelCountdown();
+      void handleSend(undefined, countdown !== null ? pendingTextRef.current : undefined);
+      return;
+    }
+    if (!e.altKey || e.ctrlKey || e.metaKey) return;
+    // e.code is layout/modifier independent (Alt+letter types special chars on macOS).
+    switch (e.code) {
+      case 'KeyM':
+        if (!loading) toggleVoiceInput();
+        break;
+      case 'KeyS':
+        cancelCountdown();
+        void handleSend(undefined, countdown !== null ? pendingTextRef.current : undefined);
+        break;
+      case 'KeyV':
+        if (ttsSupported) toggleVoiceOutput();
+        break;
+      case 'KeyX':
+        stop();
+        break;
+      case 'KeyI':
+        inputRef.current?.focus();
+        break;
+      case 'KeyR':
+        void handleReset();
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => shortcutsRef.current(e);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const handleReset = async () => {
     if (window.confirm('Clear conversation history?')) {
@@ -359,13 +410,14 @@ export const AssistantPage: React.FC = () => {
             className={`btn ${isListening ? 'btn-danger mic-listening' : 'btn-secondary'}`}
             disabled={loading}
             style={{ borderRadius: '50%', width: '44px', height: '44px', padding: 0 }}
-            title={isListening ? 'Stop listening' : 'Start voice input'}
+            title={isListening ? 'Stop listening (Alt+M)' : 'Start voice input (Alt+M)'}
           >
             {isListening ? <MicOff size={20} /> : <Mic size={20} />}
           </button>
 
           <input
             type="text"
+            ref={inputRef}
             className="input-field"
             placeholder={
               isListening
@@ -385,10 +437,21 @@ export const AssistantPage: React.FC = () => {
             className="btn btn-primary"
             style={{ borderRadius: 'var(--radius-sm)', padding: '0.75rem 1.25rem' }}
             disabled={loading || !input.trim()}
+            title="Send (Enter or Alt+S)"
           >
             <Send size={18} />
           </button>
         </form>
+        <div
+          style={{
+            padding: '0.4rem 1rem',
+            fontSize: '0.75rem',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          Shortcuts: Alt+M mic · Alt+S / Ctrl+Enter send · Alt+V spoken replies · Alt+X stop
+          speaking · Alt+I focus input · Alt+R reset · Esc cancel
+        </div>
       </div>
     </div>
   );

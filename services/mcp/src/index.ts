@@ -66,9 +66,9 @@ async function start(): Promise<void> {
     console.info(`
 ╔════════════════════════════════════════════════════════════╗
 ║                                                            ║
-║            E L D E R C A R E   M C P                      ║
+║            E L D E R C A R E   M C P                       ║
 ║                                                            ║
-║      Model Context Protocol server for ElderCare          ║
+║      Model Context Protocol server for ElderCare           ║
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
 
