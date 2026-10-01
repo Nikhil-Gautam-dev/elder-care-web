@@ -411,8 +411,9 @@ async function refresh(order: PharmacyOrderDoc): Promise<PharmacyOrderDoc> {
   }
 }
 
-const orderView = (o: PharmacyOrderDoc) => ({
+const orderView = (o: PharmacyOrderDoc, forName?: string) => ({
   orderNumber: o.orderNumber,
+  forPerson: forName,
   status: STATUS_TEXT[o.status],
   items: o.items.map((l) => ({
     medicine: label(l),
@@ -432,9 +433,13 @@ export async function getOrderStatus(
   const resolved = await authorize(person, auth, 'self-or-family');
   if (isFailure(resolved)) return resolved;
 
+  // Asking about yourself also covers orders you placed for someone else (e.g. for your mother).
+  const whose = resolved.isSelf
+    ? { $or: [{ elderId: resolved.targetUser._id }, { orderedBy: resolved.callerUser._id }] }
+    : { elderId: resolved.targetUser._id };
   const orders = await getPharmacyOrdersCollection()
     .find({
-      elderId: resolved.targetUser._id,
+      ...whose,
       ...(orderNumber ? { orderNumber: orderNumber.trim().toUpperCase() } : {}),
     })
     .sort({ createdAt: -1 })
@@ -446,7 +451,14 @@ export async function getOrderStatus(
   }
 
   const fresh = await Promise.all(orders.map(refresh));
-  return { success: true, count: fresh.length, orders: fresh.map(orderView) };
+  const people = await getUsersCollection()
+    .find({ _id: { $in: fresh.map((o) => o.elderId) } })
+    .toArray();
+  const nameOf = (o: PharmacyOrderDoc) =>
+    o.elderId.equals(resolved.targetUser._id) && resolved.isSelf
+      ? 'you'
+      : people.find((u) => u._id.equals(o.elderId))?.name;
+  return { success: true, count: fresh.length, orders: fresh.map((o) => orderView(o, nameOf(o))) };
 }
 
 export async function cancelOrder(

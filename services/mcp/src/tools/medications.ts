@@ -2,6 +2,7 @@ import { ObjectId } from 'mongodb';
 import {
   buildMedication,
   describeMedication,
+  intakesPerDay,
   medicationSupplyStatus,
   mergeMedication,
   validateMedicationInput,
@@ -142,7 +143,10 @@ function describeWhen(taken: Date, now: Date): string {
 
 /** Per medicine: doses logged today (India time) and when the last one was taken. Undone doses don't count. */
 async function doseHistory(meds: MedicationDoc[]) {
-  const out = new Map<string, { dosesTakenToday: number; lastTaken: string }>();
+  const out = new Map<
+    string,
+    { dosesTakenToday: number; lastTaken: string; takenToday?: string }
+  >();
   if (!meds.length) return out;
   const now = new Date();
   const today = istDay(now);
@@ -158,6 +162,12 @@ async function doseHistory(meds: MedicationDoc[]) {
     const entry = out.get(key) ?? { dosesTakenToday: 0, lastTaken: describeWhen(log.takenAt, now) };
     if (istDay(log.takenAt) === today) entry.dosesTakenToday += 1;
     out.set(key, entry);
+  }
+  for (const m of meds) {
+    const e = out.get(m._id.toString());
+    if (!e) continue;
+    const perDay = intakesPerDay(m.schedule);
+    e.takenToday = `${e.dosesTakenToday} of ${perDay || 'as-needed'} dose${e.dosesTakenToday === 1 ? '' : 's'} taken today`;
   }
   return out;
 }
