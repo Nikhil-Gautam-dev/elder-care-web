@@ -311,7 +311,7 @@ export async function placeOrder(draftId: string, auth?: AuthContext): Promise<T
 
   return {
     success: true,
-    orderNumber: record.orderNumber,
+    orderNumber: spokenOrderNumber(record.orderNumber),
     status: STATUS_TEXT[record.status],
     items: draft.items.map((l) => ({
       medicine: label(l),
@@ -334,7 +334,7 @@ async function notifyFamily(
   if (!orderer) return;
 
   const who = isSelf ? orderedByName : `${orderedByName} (for ${elderName})`;
-  const message = `${who} ordered ${summarise(lines)} — ${money(order.total)}, cash on delivery. Order ${order.orderNumber}.`;
+  const message = `${who} ordered ${summarise(lines)} — ${money(order.total)}, cash on delivery. Order number ${spokenOrderNumber(order.orderNumber)}.`;
 
   const recipients = new Map<string, ObjectId>();
   for (const m of orderer.members) {
@@ -411,8 +411,18 @@ async function refresh(order: PharmacyOrderDoc): Promise<PharmacyOrderDoc> {
   }
 }
 
+/** "PH-000003" -> "3": short enough to say aloud. */
+const spokenOrderNumber = (orderNumber: string): string =>
+  String(Number.parseInt(orderNumber.replace(/\D/g, ''), 10) || orderNumber);
+
+/** Accepts "3", "PH-3", "ph 000003" and "PH-000003" and returns the stored form. */
+const storedOrderNumber = (input: string): string => {
+  const digits = input.replace(/\D/g, '');
+  return digits ? `PH-${digits.padStart(6, '0')}` : input.trim().toUpperCase();
+};
+
 const orderView = (o: PharmacyOrderDoc, forName?: string) => ({
-  orderNumber: o.orderNumber,
+  orderNumber: spokenOrderNumber(o.orderNumber),
   forPerson: forName,
   status: STATUS_TEXT[o.status],
   items: o.items.map((l) => ({
@@ -440,7 +450,7 @@ export async function getOrderStatus(
   const orders = await getPharmacyOrdersCollection()
     .find({
       ...whose,
-      ...(orderNumber ? { orderNumber: orderNumber.trim().toUpperCase() } : {}),
+      ...(orderNumber ? { orderNumber: storedOrderNumber(orderNumber) } : {}),
     })
     .sort({ createdAt: -1 })
     .limit(orderNumber ? 1 : 3)
@@ -472,7 +482,7 @@ export async function cancelOrder(
   const orders = getPharmacyOrdersCollection();
   const order = await orders.findOne({
     elderId: resolved.targetUser._id,
-    orderNumber: orderNumber.trim().toUpperCase(),
+    orderNumber: storedOrderNumber(orderNumber),
   });
   if (!order) return fail(`No order ${orderNumber} found for ${resolved.targetUser.name}.`);
 
@@ -495,5 +505,5 @@ export async function cancelOrder(
     { _id: order._id },
     { $set: { status: 'cancelled', statusUpdatedAt: new Date() } },
   );
-  return { success: true, cancelled: order.orderNumber };
+  return { success: true, cancelled: spokenOrderNumber(order.orderNumber) };
 }

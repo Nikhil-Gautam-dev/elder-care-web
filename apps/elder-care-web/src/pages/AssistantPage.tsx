@@ -1,8 +1,41 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Mic, MicOff, RefreshCw, Bot, User as UserIcon } from 'lucide-react';
+import {
+  Send,
+  Mic,
+  MicOff,
+  RefreshCw,
+  Bot,
+  User as UserIcon,
+  Volume2,
+  VolumeX,
+  Square,
+} from 'lucide-react';
 import { sendChatMessage, resetChatSession, type ChatMessage } from '../services/agentApi';
+import { useAuth } from '../context/AuthContext';
+import { useSpeech, toSpeechLang } from '../hooks/useSpeech';
+import { useVoiceInput } from '../hooks/useVoiceInput';
+import { toSpeakableText } from '../utils/speechText';
+
+const VOICE_OUTPUT_KEY = 'eldercare_voice_output';
 
 export const AssistantPage: React.FC = () => {
+  const { user } = useAuth();
+  const speechLang = toSpeechLang(user?.preferences?.language);
+  const {
+    speak,
+    stop,
+    isSpeaking,
+    supported: ttsSupported,
+    voiceList,
+    loadVoices,
+    voiceURI,
+    setVoiceURI,
+  } = useSpeech();
+  const [voiceOutput, setVoiceOutput] = useState<boolean>(() => {
+    const saved = localStorage.getItem(VOICE_OUTPUT_KEY);
+    return saved !== null ? saved === 'true' : (user?.accessibility?.voiceEnabled ?? true);
+  });
+
   const [sessionId] = useState<string>(() => {
     const existing = localStorage.getItem('eldercare_chat_session');
     if (existing) return existing;
@@ -22,61 +55,62 @@ export const AssistantPage: React.FC = () => {
 
   const [input, setInput] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
-  const [isListening, setIsListening] = useState<boolean>(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [voiceError, setVoiceError] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
+  const AUTO_SEND_SECONDS = 3;
+  const pendingTextRef = useRef<string>('');
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  useEffect(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
+  const {
+    isListening,
+    start: startListening,
+    stop: stopListening,
+    supported: micSupported,
+  } = useVoiceInput({
+    lang: speechLang,
+    onText: setInput,
+    onSilence: (text) => {
+      pendingTextRef.current = text;
+      setCountdown(AUTO_SEND_SECONDS);
+    },
+    onError: setVoiceError,
+  });
 
-      recognition.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        if (transcript) {
-          setInput(transcript);
-        }
-        setIsListening(false);
-      };
-
-      recognition.onerror = () => {
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-    }
-  }, []);
+  const cancelCountdown = () => setCountdown(null);
 
   const toggleVoiceInput = () => {
-    if (!recognitionRef.current) {
-      alert('Voice recognition is not supported in this browser.');
+    if (!micSupported) {
+      setVoiceError('Voice input is not supported in this browser. Please try Chrome or Edge.');
       return;
     }
-
+    setVoiceError('');
     if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
+      stopListening();
     } else {
-      recognitionRef.current.start();
-      setIsListening(true);
+      stop();
+      cancelCountdown();
+      startListening(input);
     }
   };
 
-  const handleSend = async (e?: React.FormEvent) => {
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown <= 0) {
+      setCountdown(null);
+      void handleSend(undefined, pendingTextRef.current);
+      return;
+    }
+    const t = setTimeout(() => setCountdown((c) => (c === null ? null : c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [countdown]);
+
+  const handleSend = async (e?: React.FormEvent, override?: string) => {
     if (e) e.preventDefault();
-    const text = input.trim();
+    const text = (override ?? input).trim();
     if (!text || loading) return;
 
     const userMsg: ChatMessage = {
@@ -86,6 +120,9 @@ export const AssistantPage: React.FC = () => {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
+    stop();
+    stopListening();
+    cancelCountdown();
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setLoading(true);
@@ -99,6 +136,7 @@ export const AssistantPage: React.FC = () => {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, assistantMsg]);
+      if (voiceOutput) speak(toSpeakableText(res.reply), speechLang);
     } catch (err: any) {
       const errorMsg: ChatMessage = {
         id: `err_${Date.now()}`,
@@ -112,8 +150,33 @@ export const AssistantPage: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (!ttsSupported) return;
+    loadVoices(speechLang);
+    // Voices often load asynchronously after the first render.
+    const refresh = () => loadVoices(speechLang);
+    window.speechSynthesis.addEventListener('voiceschanged', refresh);
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', refresh);
+  }, [ttsSupported, speechLang, loadVoices]);
+
+  const handleVoiceChange = (uri: string) => {
+    setVoiceURI(uri);
+    // Wait a tick so speak() reads the newly saved voice from localStorage.
+    setTimeout(() => speak('Hello, this is how I sound.', speechLang), 0);
+  };
+
+  const toggleVoiceOutput = () => {
+    const next = !voiceOutput;
+    setVoiceOutput(next);
+    localStorage.setItem(VOICE_OUTPUT_KEY, String(next));
+    if (!next) stop();
+  };
+
   const handleReset = async () => {
     if (window.confirm('Clear conversation history?')) {
+      stop();
+      stopListening();
+      cancelCountdown();
       try {
         await resetChatSession(sessionId);
       } catch {}
@@ -145,15 +208,59 @@ export const AssistantPage: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleReset}
-          className="btn btn-secondary"
-          type="button"
-          title="Reset Session"
-        >
-          <RefreshCw size={16} />
-          <span>Reset Chat</span>
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {ttsSupported && (
+            <>
+              {isSpeaking && (
+                <button
+                  onClick={stop}
+                  className="btn btn-danger"
+                  type="button"
+                  title="Stop speaking"
+                >
+                  <Square size={16} />
+                  <span>Stop</span>
+                </button>
+              )}
+              {voiceList.length > 0 && (
+                <select
+                  className="input-field"
+                  style={{ width: 'auto', maxWidth: '200px' }}
+                  value={voiceList.some((v) => v.voiceURI === voiceURI) ? voiceURI : ''}
+                  onChange={(e) => handleVoiceChange(e.target.value)}
+                  aria-label="Assistant voice"
+                  title="Choose assistant voice"
+                >
+                  <option value="">Default voice</option>
+                  {voiceList.map((v) => (
+                    <option key={v.voiceURI} value={v.voiceURI}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                onClick={toggleVoiceOutput}
+                className={`btn ${voiceOutput ? 'btn-primary' : 'btn-secondary'}`}
+                type="button"
+                aria-pressed={voiceOutput}
+                title={voiceOutput ? 'Spoken replies on' : 'Spoken replies off'}
+              >
+                {voiceOutput ? <Volume2 size={16} /> : <VolumeX size={16} />}
+                <span>{voiceOutput ? 'Voice on' : 'Voice off'}</span>
+              </button>
+            </>
+          )}
+          <button
+            onClick={handleReset}
+            className="btn btn-secondary"
+            type="button"
+            title="Reset Session"
+          >
+            <RefreshCw size={16} />
+            <span>Reset Chat</span>
+          </button>
+        </div>
       </div>
 
       <div className="chat-container">
@@ -194,6 +301,16 @@ export const AssistantPage: React.FC = () => {
                   }}
                 >
                   {msg.timestamp}
+                  {msg.sender === 'assistant' && ttsSupported && (
+                    <button
+                      type="button"
+                      className="chat-listen-btn"
+                      onClick={() => speak(toSpeakableText(msg.text), speechLang)}
+                      title="Listen to this message"
+                    >
+                      <Volume2 size={14} /> Listen
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -210,11 +327,37 @@ export const AssistantPage: React.FC = () => {
           <div ref={messagesEndRef} />
         </div>
 
+        {(countdown !== null || voiceError) && (
+          <div className="chat-voice-banner" role="status">
+            {countdown !== null ? (
+              <>
+                <span>Sending in {countdown}…</span>
+                <button type="button" className="btn btn-secondary" onClick={cancelCountdown}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    cancelCountdown();
+                    void handleSend(undefined, pendingTextRef.current);
+                  }}
+                >
+                  Send now
+                </button>
+              </>
+            ) : (
+              <span>{voiceError}</span>
+            )}
+          </div>
+        )}
+
         <form onSubmit={handleSend} className="chat-input-bar">
           <button
             type="button"
             onClick={toggleVoiceInput}
-            className={`btn ${isListening ? 'btn-danger' : 'btn-secondary'}`}
+            className={`btn ${isListening ? 'btn-danger mic-listening' : 'btn-secondary'}`}
+            disabled={loading}
             style={{ borderRadius: '50%', width: '44px', height: '44px', padding: 0 }}
             title={isListening ? 'Stop listening' : 'Start voice input'}
           >
@@ -226,11 +369,14 @@ export const AssistantPage: React.FC = () => {
             className="input-field"
             placeholder={
               isListening
-                ? 'Listening to your voice...'
+                ? 'Listening… pause for a moment to send'
                 : 'Type a message (e.g., "Book a ride to the clinic")'
             }
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              cancelCountdown();
+              setInput(e.target.value);
+            }}
             disabled={loading}
           />
 
