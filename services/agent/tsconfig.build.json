@@ -3,11 +3,7 @@
   "extends": "../../packages/config/typescript/node.json",
   "compilerOptions": {
     "noEmit": false,
-    "outDir": "dist",
-    "baseUrl": ".",
-    "paths": {
-      "@eldercare/shared": ["../../packages/shared/src/index.ts"]
-    }
+    "outDir": "dist"
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]
