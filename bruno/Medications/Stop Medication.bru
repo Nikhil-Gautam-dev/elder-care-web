@@ -1,0 +1,14 @@
+meta {
+  name: Stop Medication
+  type: http
+  seq: 3
+}
+
+delete {
+  url: {{baseUrl}}/medications/{{medicationId}}
+  body: none
+  auth: bearer
+}
+auth:bearer {
+  token: {{authToken}}
+}

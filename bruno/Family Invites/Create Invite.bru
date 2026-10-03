@@ -1,0 +1,32 @@
+meta {
+  name: Create Invite
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/family/invites
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "relationship": "son",
+    "isElder": false,
+    "targetPhone": "+919876543211",
+    "canReceiveNotifications": true,
+    "canManageOrders": true,
+    "canManageRides": true
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.inviteCode) {
+    bru.setVar("inviteToken", res.body.inviteCode);
+  }
+}

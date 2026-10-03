@@ -1,0 +1,40 @@
+meta {
+  name: Update User Profile
+  type: http
+  seq: 2
+}
+
+put {
+  url: {{baseUrl}}/users/{{userId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "name": "Nikhil",
+    "age": 70,
+    "email": "jane@example.com",
+    "address": {
+      "line1": "123 Main St",
+      "city": "Springfield",
+      "state": "IL",
+      "postalCode": "62701",
+      "country": "USA"
+    },
+    "preferences": {
+      "language": "en",
+      "usualPharmacy": "CVS Pharmacy #104",
+      "preferredRide": "accessible",
+      "notificationChannel": "sms"
+    },
+    "accessibility": {
+      "largeText": true,
+      "voiceEnabled": true
+    }
+  }
+}

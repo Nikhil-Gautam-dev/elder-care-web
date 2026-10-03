@@ -1,0 +1,192 @@
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Lock, ArrowRight, HeartHandshake } from 'lucide-react';
+import { COUNTRY_CODE, PHONE_DIGITS, formatIndianPhone } from '@eldercare/shared';
+import { sendOtp, verifyOtp } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import { PhoneInput } from '../components/PhoneInput';
+
+export const LoginPage: React.FC = () => {
+  const [step, setStep] = useState<'phone' | 'otp'>('phone');
+  // Only the 10 national digits; +91 is added when talking to the API.
+  const [phone, setPhone] = useState<string>('');
+  const fullPhone = `${COUNTRY_CODE}${phone}`;
+  const [otp, setOtp] = useState<string>('');
+  const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+
+  const { setAuthData } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (phone.length !== PHONE_DIGITS) {
+      setError(`Please enter your ${PHONE_DIGITS}-digit mobile number`);
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await sendOtp(fullPhone);
+      if (res.otp) {
+        setDevOtpHint(res.otp);
+      }
+      setStep('otp');
+    } catch (err: any) {
+      setError(err.message || 'Failed to send OTP');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otp.trim()) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await verifyOtp(fullPhone, otp.trim());
+      await setAuthData(res.token, res.user.id);
+      navigate('/');
+    } catch (err: any) {
+      setError(err.message || 'Invalid or expired OTP');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: '440px', margin: '4rem auto', width: '100%' }}>
+      <div className="card" style={{ textAlign: 'center', padding: '2.5rem 2rem' }}>
+        <div
+          style={{
+            width: '64px',
+            height: '64px',
+            background: 'var(--primary-light)',
+            color: 'var(--primary)',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1.5rem auto',
+          }}
+        >
+          <HeartHandshake size={36} />
+        </div>
+
+        <h1 style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: '0.5rem' }}>
+          Welcome to ElderCare
+        </h1>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>
+          {step === 'phone'
+            ? 'Sign in or register with your phone number'
+            : `Enter the 6-digit code sent to ${formatIndianPhone(fullPhone)}`}
+        </p>
+
+        {error && (
+          <div
+            style={{
+              background: 'var(--danger-light)',
+              color: 'var(--danger)',
+              padding: '0.75rem 1rem',
+              borderRadius: 'var(--radius-sm)',
+              marginBottom: '1.5rem',
+              textAlign: 'left',
+              fontSize: '0.95rem',
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {devOtpHint && step === 'otp' && (
+          <div
+            style={{
+              background: 'var(--warning-light)',
+              color: 'var(--warning)',
+              padding: '0.75rem 1rem',
+              borderRadius: 'var(--radius-sm)',
+              marginBottom: '1.5rem',
+              textAlign: 'left',
+              fontSize: '0.95rem',
+            }}
+          >
+            Dev OTP Code: <strong>{devOtpHint}</strong>
+          </div>
+        )}
+
+        {step === 'phone' ? (
+          <form onSubmit={handleSendOtp}>
+            <div className="form-group" style={{ textAlign: 'left' }}>
+              <label className="form-label" htmlFor="phone-input">
+                Phone Number
+              </label>
+              <PhoneInput id="phone-input" value={phone} onChange={setPhone} required autoFocus />
+            </div>
+
+            <button
+              type="submit"
+              className="btn btn-primary btn-large"
+              style={{ width: '100%', marginTop: '1rem' }}
+              disabled={loading || phone.length !== PHONE_DIGITS}
+            >
+              <span>{loading ? 'Sending Code...' : 'Get Verification Code'}</span>
+              <ArrowRight size={18} />
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleVerifyOtp}>
+            <div className="form-group" style={{ textAlign: 'left' }}>
+              <label className="form-label" htmlFor="otp-input">
+                Verification OTP Code
+              </label>
+              <div style={{ position: 'relative' }}>
+                <Lock
+                  size={18}
+                  style={{
+                    position: 'absolute',
+                    left: '12px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: 'var(--text-muted)',
+                  }}
+                />
+                <input
+                  id="otp-input"
+                  type="text"
+                  className="input-field"
+                  style={{ paddingLeft: '2.5rem', letterSpacing: '4px', fontWeight: 600 }}
+                  placeholder="123456"
+                  maxLength={6}
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="btn btn-primary btn-large"
+              style={{ width: '100%', marginTop: '1rem' }}
+              disabled={loading}
+            >
+              <span>{loading ? 'Verifying...' : 'Verify & Continue'}</span>
+              <ArrowRight size={18} />
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ width: '100%', marginTop: '0.75rem' }}
+              onClick={() => setStep('phone')}
+            >
+              Change Phone Number
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+};

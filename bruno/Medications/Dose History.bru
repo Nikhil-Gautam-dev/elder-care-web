@@ -1,0 +1,14 @@
+meta {
+  name: Dose History
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/medications/{{medicationId}}/doses?limit=10
+  body: none
+  auth: bearer
+}
+auth:bearer {
+  token: {{authToken}}
+}

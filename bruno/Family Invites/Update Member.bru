@@ -1,0 +1,22 @@
+meta {
+  name: Update Member (admin)
+  type: http
+  seq: 8
+}
+
+patch {
+  url: {{baseUrl}}/family/members/{{memberId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "isElder": true,
+    "canManageOrders": true
+  }
+}

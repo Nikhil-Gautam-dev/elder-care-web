@@ -1,0 +1,16 @@
+{
+  "name": "@eldercare/tsconfig",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shared TypeScript configurations for ElderCare monorepo",
+  "exports": {
+    "./base.json": "./base.json",
+    "./node.json": "./node.json",
+    "./nextjs.json": "./nextjs.json"
+  },
+  "keywords": [
+    "typescript",
+    "config",
+    "eldercare"
+  ]
+}

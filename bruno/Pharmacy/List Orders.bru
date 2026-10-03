@@ -1,0 +1,14 @@
+meta {
+  name: List Orders (pharmacist)
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{pharmacyUrl}}/orders?status=placed,accepted
+  body: none
+  auth: bearer
+}
+auth:bearer {
+  token: {{pharmacyToken}}
+}

@@ -1,0 +1,22 @@
+meta {
+  name: Set Alias
+  type: http
+  seq: 7
+}
+
+put {
+  url: {{baseUrl}}/family/aliases
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}
+
+body:json {
+  {
+    "targetId": "{{memberId}}",
+    "alias": "Dadu"
+  }
+}

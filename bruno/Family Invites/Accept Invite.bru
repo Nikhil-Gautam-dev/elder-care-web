@@ -1,0 +1,15 @@
+meta {
+  name: Accept Invite
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/family/invites/{{inviteToken}}/accept
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}

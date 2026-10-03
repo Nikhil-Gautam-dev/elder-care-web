@@ -1,0 +1,15 @@
+meta {
+  name: Get My Family
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/family
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{authToken}}
+}

@@ -1,0 +1,18 @@
+meta {
+  name: Update Order Status (pharmacist)
+  type: http
+  seq: 5
+}
+
+patch {
+  url: {{pharmacyUrl}}/orders/{{pharmacyOrderId}}/status
+  body: json
+  auth: bearer
+}
+auth:bearer {
+  token: {{pharmacyToken}}
+}
+
+body:json {
+  { "status": "accepted" }
+}
