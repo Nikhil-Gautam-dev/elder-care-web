@@ -2,6 +2,7 @@ import 'express-async-errors';
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import morgan from 'morgan';
 
 import { connectDb, closeDb } from './config/db.js';
 import { ensureIndexes } from './models/pharmacy.model.js';
@@ -11,6 +12,11 @@ import routes from './routes/index.js';
 const app = express();
 
 app.use(cors());
+app.use(
+  morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev', {
+    skip: (req) => req.path === '/health',
+  }),
+);
 app.use(express.json());
 
 app.get('/health', (_req, res) => {

@@ -6,6 +6,9 @@ export default defineConfig(({ mode }) => {
   const apiTarget = env.API_PROXY_TARGET || 'http://localhost:3001';
   const agentTarget = env.AGENT_PROXY_TARGET || 'http://localhost:3002';
 
+  console.info('api-url', apiTarget);
+  console.info('agent-url: ', agentTarget);
+
   return {
     plugins: [react()],
     server: {
