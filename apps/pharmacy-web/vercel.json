@@ -1,0 +1,9 @@
+{
+  "rewrites": [
+    {
+      "source": "/pharmacy-api/:path*",
+      "destination": "https://elder-care-pharmacy.onrender.com/:path*"
+    },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
