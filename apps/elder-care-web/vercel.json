@@ -5,6 +5,14 @@
       "source": "/agent-api/:path*",
       "destination": "https://elder-care-agent-8hst.onrender.com/:path*"
     },
+    {
+      "source": "/pharmacy-api/:path*",
+      "destination": "https://elder-care-pharmacy.onrender.com/:path*"
+    },
+    {
+      "source": "/mcp-api/:path*",
+      "destination": "https://elder-care-mcp.onrender.com/:path*"
+    },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

@@ -340,3 +340,13 @@ a {
     box-shadow: 0 0 0 8px rgba(220, 38, 38, 0);
   }
 }
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
