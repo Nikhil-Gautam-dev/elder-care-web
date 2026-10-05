@@ -1,0 +1,14 @@
+meta {
+  name: List Rides (dispatcher)
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{ridesUrl}}/rides?status=requested,accepted,arriving,in_progress
+  body: none
+  auth: bearer
+}
+auth:bearer {
+  token: {{ridesToken}}
+}

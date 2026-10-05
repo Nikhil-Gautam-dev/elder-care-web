@@ -1,0 +1,23 @@
+meta {
+  name: Dispatcher Login
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{ridesUrl}}/auth/login
+  body: json
+  auth: none
+}
+body:json {
+  {
+    "username": "dispatcher",
+    "password": "{{ridesPassword}}"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.data && res.body.data.token) {
+    bru.setVar("ridesToken", res.body.data.token);
+  }
+}

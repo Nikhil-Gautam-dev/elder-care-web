@@ -1,0 +1,20 @@
+meta {
+  name: List Drivers (API key)
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{ridesUrl}}/drivers
+  body: none
+  auth: none
+}
+headers {
+  X-API-Key: {{ridesApiKey}}
+}
+
+script:post-response {
+  if (res.body && res.body.data && res.body.data.items.length) {
+    bru.setVar("driverId", res.body.data.items[0].id);
+  }
+}
