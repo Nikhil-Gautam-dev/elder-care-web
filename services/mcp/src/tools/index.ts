@@ -22,3 +22,4 @@ export {
   getOrderStatus,
   cancelOrder,
 } from './pharmacy.js';
+export { prepareRide, bookRide, getRideStatus, listRides, cancelRide } from './rides.js';

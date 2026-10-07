@@ -1,0 +1,40 @@
+meta {
+  name: Book Ride (MCP)
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base-mcp-url}}/mcp
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json, text/event-stream
+}
+
+body:json {
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "book_ride",
+    "arguments": {
+      "draftId": "{{rideDraftId}}",
+      "auth": { "id": "{{userId}}", "phone": "{{userPhone}}", "role": "user" }
+    }
+  }
+}
+}
+
+docs {
+  Calls the `book_ride` tool directly. The agent normally injects `auth` from the verified JWT;
+  here set `userId` and `userPhone` in the environment by hand. Copy `draftId` from the Prepare Ride response into `rideDraftId`.
+}
+
+vars:pre-request {
+  base-mcp-url: http://localhost:3003
+}
