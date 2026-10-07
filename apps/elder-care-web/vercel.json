@@ -10,6 +10,10 @@
       "destination": "https://elder-care-pharmacy.onrender.com/:path*"
     },
     {
+      "source": "/rides-api/:path*",
+      "destination": "https://elder-care-rides.onrender.com/:path*"
+    },
+    {
       "source": "/mcp-api/:path*",
       "destination": "https://elder-care-mcp.onrender.com/:path*"
     },

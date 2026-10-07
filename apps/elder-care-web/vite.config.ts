@@ -5,6 +5,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const apiTarget = env.API_PROXY_TARGET || 'http://localhost:3001';
   const pharmacyTarget = env.PHARMACY_PROXY_TARGET || 'http://localhost:3004';
+  const ridesTarget = env.RIDES_PROXY_TARGET || 'http://localhost:3005';
   const mcpTarget = env.MCP_PROXY_TARGET || 'http://localhost:3003';
   const agentTarget = env.AGENT_PROXY_TARGET || 'http://localhost:3002';
 
@@ -27,6 +28,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: true,
           rewrite: (path) => path.replace(/^\/pharmacy-api/, ''),
+        },
+        '/rides-api': {
+          target: ridesTarget,
+          changeOrigin: true,
+          secure: true,
+          rewrite: (path) => path.replace(/^\/rides-api/, ''),
         },
         '/mcp-api': {
           target: mcpTarget,

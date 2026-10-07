@@ -32,6 +32,7 @@ const SERVICES: ServiceDef[] = [
     }),
   },
   { id: 'pharmacy', label: 'Pharmacy API', url: '/pharmacy-api/health' },
+  { id: 'rides', label: 'Rides API', url: '/rides-api/health' },
   { id: 'mcp', label: 'MCP', url: '/mcp-api/health' },
 ];
 

@@ -1,0 +1,9 @@
+{
+  "rewrites": [
+    {
+      "source": "/rides-api/:path*",
+      "destination": "https://elder-care-rides.onrender.com/:path*"
+    },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
