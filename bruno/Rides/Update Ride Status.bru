@@ -1,0 +1,23 @@
+meta {
+  name: Update Ride Status (dispatcher)
+  type: http
+  seq: 6
+}
+
+patch {
+  url: {{ridesUrl}}/rides/{{rideId}}/status
+  body: json
+  auth: bearer
+}
+auth:bearer {
+  token: {{ridesToken}}
+}
+
+body:json {
+  { "status": "accepted", "driverId": "{{driverId}}" }
+}
+
+docs {
+  Flow: requested -> accepted (needs driverId) -> arriving -> in_progress -> completed.
+  "rejected" needs a "reason". Run List Drivers first to fill driverId.
+}

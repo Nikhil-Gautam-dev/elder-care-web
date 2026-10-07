@@ -1,0 +1,21 @@
+meta {
+  name: Fare Estimate (API key)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{ridesUrl}}/rides/fare-estimate
+  body: json
+  auth: none
+}
+headers {
+  X-API-Key: {{ridesApiKey}}
+}
+
+body:json {
+  {
+    "pickup": { "address": "14 Green Valley Road, Delhi", "lat": 28.6139, "lng": 77.209 },
+    "drop": { "address": "Apollo Hospital, Sarita Vihar", "lat": 28.5355, "lng": 77.391 }
+  }
+}

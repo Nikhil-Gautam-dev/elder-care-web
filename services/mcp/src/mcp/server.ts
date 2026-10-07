@@ -22,6 +22,11 @@ import {
   placeOrder,
   getOrderStatus,
   cancelOrder,
+  prepareRide,
+  bookRide,
+  getRideStatus,
+  listRides,
+  cancelRide,
 } from '../tools/index.js';
 import type { ToolResult } from '../tools/result.js';
 
@@ -384,6 +389,88 @@ export function createMcpServer(): McpServer {
     async ({ person, orderNumber, auth }) => {
       log('cancel_order', auth);
       return reply(await cancelOrder(person, orderNumber, toAuth(auth)));
+    },
+  );
+
+  // ── Rides ──────────────────────────────────────────────────────────────────
+  server.registerTool(
+    'prepare_ride',
+    {
+      title: 'Prepare Ride',
+      description:
+        "Step 1 of booking a ride. Checks the trip and returns a draftId with a summary and fare estimate. Nothing is booked yet. Pickup defaults to the person's saved home address; a drop place is required.",
+      inputSchema: {
+        person,
+        pickup: z.string().optional().describe('Pickup place. Omit to use the saved home address.'),
+        drop: z.string().describe('Where to go, e.g. "Apollo Hospital, Sarita Vihar".'),
+        when: z
+          .string()
+          .optional()
+          .describe(
+            'Pickup time as ISO date-time in India time, e.g. "2026-10-08T17:00:00+05:30". Omit or "now" for as soon as possible.',
+          ),
+        notes: z.string().optional().describe('For the driver, e.g. "needs wheelchair help".'),
+        auth: authSchema,
+      },
+    },
+    async ({ person, auth, ...args }) => {
+      log('prepare_ride', auth);
+      return reply(await prepareRide(person, args, toAuth(auth)));
+    },
+  );
+
+  server.registerTool(
+    'book_ride',
+    {
+      title: 'Book Ride',
+      description:
+        'Step 2: book exactly the prepared ride. Only after the user clearly said yes to the read-back summary. Safe to repeat: never books twice.',
+      inputSchema: { draftId: z.string(), auth: authSchema },
+    },
+    async ({ draftId, auth }) => {
+      log('book_ride', auth);
+      return reply(await bookRide(draftId, toAuth(auth)));
+    },
+  );
+
+  server.registerTool(
+    'get_ride_status',
+    {
+      title: 'Get Ride Status',
+      description:
+        "Status of a person's latest ride (or one by ride number), with the driver and vehicle once assigned.",
+      inputSchema: { person, rideNumber: z.string().optional(), auth: authSchema },
+    },
+    async ({ person, rideNumber, auth }) => {
+      log('get_ride_status', auth);
+      return reply(await getRideStatus(person, rideNumber, toAuth(auth)));
+    },
+  );
+
+  server.registerTool(
+    'list_rides',
+    {
+      title: 'List Rides',
+      description: "A person's recent rides, newest first.",
+      inputSchema: { person, auth: authSchema },
+    },
+    async ({ person, auth }) => {
+      log('list_rides', auth);
+      return reply(await listRides(person, toAuth(auth)));
+    },
+  );
+
+  server.registerTool(
+    'cancel_ride',
+    {
+      title: 'Cancel Ride',
+      description:
+        'Cancel a ride that has not started yet (omit rideNumber for the latest cancellable one). Confirm first.',
+      inputSchema: { person, rideNumber: z.string().optional(), auth: authSchema },
+    },
+    async ({ person, rideNumber, auth }) => {
+      log('cancel_ride', auth);
+      return reply(await cancelRide(person, rideNumber, toAuth(auth)));
     },
   );
 

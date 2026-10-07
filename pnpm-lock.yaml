@@ -117,6 +117,16 @@ importers:
         version: 5.4.21(@types/node@22.20.4)
 
   apps/rides-web:
+    dependencies:
+      lucide-react:
+        specifier: ^0.460.0
+        version: 0.460.0(react@18.3.1)
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.1
+        version: 18.3.1(react@18.3.1)
     devDependencies:
       '@eldercare/eslint-config':
         specifier: workspace:*
@@ -127,9 +137,21 @@ importers:
       '@eldercare/tsconfig':
         specifier: workspace:*
         version: link:../../packages/config/typescript
+      '@types/react':
+        specifier: ^18.3.12
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.1
+        version: 18.3.7(@types/react@18.3.31)
+      '@vitejs/plugin-react':
+        specifier: ^4.3.3
+        version: 4.7.0(vite@5.4.21(@types/node@22.20.4))
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
+      vite:
+        specifier: ^5.4.11
+        version: 5.4.21(@types/node@22.20.4)
 
   packages/config/eslint:
     dependencies:
@@ -313,6 +335,61 @@ importers:
         version: 5.9.3
 
   services/pharmacy-api:
+    dependencies:
+      cors:
+        specifier: ^2.8.5
+        version: 2.8.6
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
+      express:
+        specifier: ^4.19.2
+        version: 4.22.3
+      express-async-errors:
+        specifier: ^3.1.1
+        version: 3.1.1(express@4.22.3)
+      jsonwebtoken:
+        specifier: ^9.0.2
+        version: 9.0.3
+      mongodb:
+        specifier: ^6.8.0
+        version: 6.21.0
+      morgan:
+        specifier: ^1.12.1
+        version: 1.12.1
+    devDependencies:
+      '@eldercare/eslint-config':
+        specifier: workspace:*
+        version: link:../../packages/config/eslint
+      '@eldercare/prettier-config':
+        specifier: workspace:*
+        version: link:../../packages/config/prettier
+      '@eldercare/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/config/typescript
+      '@types/cors':
+        specifier: ^2.8.17
+        version: 2.8.19
+      '@types/express':
+        specifier: ^4.17.21
+        version: 4.17.25
+      '@types/jsonwebtoken':
+        specifier: ^9.0.6
+        version: 9.0.10
+      '@types/morgan':
+        specifier: ^1.9.10
+        version: 1.9.10
+      '@types/node':
+        specifier: ^20.14.0
+        version: 20.19.43
+      tsx:
+        specifier: ^4.16.0
+        version: 4.23.15
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
+  services/rides-api:
     dependencies:
       cors:
         specifier: ^2.8.5

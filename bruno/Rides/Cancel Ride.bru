@@ -1,0 +1,18 @@
+meta {
+  name: Cancel Ride (API key)
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{ridesUrl}}/rides/{{rideId}}/cancel
+  body: json
+  auth: none
+}
+headers {
+  X-API-Key: {{ridesApiKey}}
+}
+
+body:json {
+  { "note": "Rider changed plans" }
+}

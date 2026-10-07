@@ -1,5 +1,11 @@
 import { MongoClient, type Db, type Collection, type ObjectId } from 'mongodb';
-import type { DaySlot, FoodTiming, MedicationForm, PharmacyOrderStatus } from '@eldercare/shared';
+import type {
+  DaySlot,
+  FoodTiming,
+  MedicationForm,
+  PharmacyOrderStatus,
+  RideStatus,
+} from '@eldercare/shared';
 
 let client: MongoClient;
 let db: Db;
@@ -14,6 +20,8 @@ export const MEDICATIONS_COLLECTION = 'medications';
 export const PHARMACY_ORDERS_COLLECTION = 'pharmacy_orders';
 export const ORDER_DRAFTS_COLLECTION = 'pharmacy_order_drafts';
 export const DOSE_LOGS_COLLECTION = 'medication_dose_logs';
+export const RIDES_COLLECTION = 'rides';
+export const RIDE_DRAFTS_COLLECTION = 'ride_drafts';
 
 export interface UserDoc {
   _id: ObjectId;
@@ -174,6 +182,48 @@ export interface OrderDraftDoc {
   expiresAt: Date;
 }
 
+export interface RideDoc {
+  _id: ObjectId;
+  /** The draft this ride was booked from: unique, so one draft can never book two rides. */
+  draftId: ObjectId;
+  ridesRideId: string;
+  rideNumber: string;
+  elderId: ObjectId;
+  bookedBy: ObjectId;
+  bookedByName: string;
+  pickup: string;
+  drop: string;
+  scheduledAt: Date | null;
+  notes?: string;
+  fareEstimate: number;
+  status: RideStatus;
+  driver?: { name: string; vehicle: string; plate: string };
+  rejectionReason?: string;
+  /** Who cancelled it through the assistant (not set when cancelled elsewhere, e.g. in rides-web). */
+  cancelledBy?: ObjectId;
+  cancelledByName?: string;
+  statusUpdatedAt: Date;
+  /** Set once the family has been told the ride ended (completed, cancelled or rejected). */
+  endNotified?: boolean;
+  createdAt: Date;
+}
+
+/** What the user confirmed: `book_ride` can only book exactly this. Expires after 15 minutes. */
+export interface RideDraftDoc {
+  _id: ObjectId;
+  callerId: ObjectId;
+  elderId: ObjectId;
+  pickup: string;
+  drop: string;
+  scheduledAt: Date | null;
+  notes?: string;
+  fareEstimate: number;
+  rider: { name: string; phone: string };
+  used: boolean;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
 export interface NotificationDoc {
   _id?: ObjectId;
   recipientId: ObjectId;
@@ -232,9 +282,18 @@ export const getPharmacyOrdersCollection = (): Collection<PharmacyOrderDoc> =>
 export const getOrderDraftsCollection = (): Collection<OrderDraftDoc> =>
   getDb().collection<OrderDraftDoc>(ORDER_DRAFTS_COLLECTION);
 
+export const getRidesCollection = (): Collection<RideDoc> =>
+  getDb().collection<RideDoc>(RIDES_COLLECTION);
+
+export const getRideDraftsCollection = (): Collection<RideDraftDoc> =>
+  getDb().collection<RideDraftDoc>(RIDE_DRAFTS_COLLECTION);
+
 export async function ensureMcpIndexes(): Promise<void> {
   await getOrderDraftsCollection().createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
   await getDoseLogsCollection().createIndex({ medicationId: 1, takenAt: -1 });
+  await getRideDraftsCollection().createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+  await getRidesCollection().createIndex({ draftId: 1 }, { unique: true });
+  await getRidesCollection().createIndex({ elderId: 1, createdAt: -1 });
 }
 
 export async function closeDb(): Promise<void> {

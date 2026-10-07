@@ -9,7 +9,7 @@ ElderCare/
 ├── apps/
 │   ├── elder-care-web/      # Main elder care web app
 │   ├── pharmacy-web/        # Pharmacy portal (pharmacist orders + stock)
-│   └── rides-web/           # Rides booking app
+│   └── rides-web/           # Rides portal (dispatcher/driver ride requests + drivers)
 ├── packages/
 │   ├── config/
 │   │   ├── eslint/          # @eldercare/eslint-config
@@ -20,6 +20,7 @@ ElderCare/
 │   ├── agent/               # @eldercare/agent — AI agent service
 │   ├── api/                 # @eldercare/api — REST API
 │   ├── pharmacy-api/        # @eldercare/pharmacy-api — independent pharmacy service
+│   ├── rides-api/           # @eldercare/rides-api — independent rides service
 │   └── mcp/                 # @eldercare/mcp — MCP server
 └── docs/                    # Documentation
 ```

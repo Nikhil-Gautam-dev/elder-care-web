@@ -1,0 +1,40 @@
+meta {
+  name: Prepare Ride (MCP)
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base-mcp-url}}/mcp
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json, text/event-stream
+}
+
+body:json {
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "prepare_ride",
+    "arguments": {
+      "drop": "Apollo Hospital, Sarita Vihar", "when": "2026-10-08T17:00:00+05:30", "notes": "Needs help getting in", "person": "me",
+      "auth": { "id": "{{userId}}", "phone": "{{userPhone}}", "role": "user" }
+    }
+  }
+}
+}
+
+docs {
+  Calls the `prepare_ride` tool directly. The agent normally injects `auth` from the verified JWT;
+  here set `userId` and `userPhone` in the environment by hand.
+}
+
+vars:pre-request {
+  base-mcp-url: http://localhost:3003
+}

@@ -80,3 +80,11 @@ export {
   deliveryAddressGaps,
   formatAddress,
 } from "./address/index.js";
+export {
+  RIDE_STATUSES,
+  FINAL_RIDE_STATUSES,
+  CANCELLABLE_RIDE_STATUSES,
+  type RideStatus,
+  type IRideDriver,
+  type IRide,
+} from "./types/ride.js";

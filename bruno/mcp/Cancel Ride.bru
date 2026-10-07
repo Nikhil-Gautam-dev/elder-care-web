@@ -1,0 +1,40 @@
+meta {
+  name: Cancel Ride (MCP)
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base-mcp-url}}/mcp
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json, text/event-stream
+}
+
+body:json {
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "cancel_ride",
+    "arguments": {
+      "person": "me",
+      "auth": { "id": "{{userId}}", "phone": "{{userPhone}}", "role": "user" }
+    }
+  }
+}
+}
+
+docs {
+  Calls the `cancel_ride` tool directly. The agent normally injects `auth` from the verified JWT;
+  here set `userId` and `userPhone` in the environment by hand.
+}
+
+vars:pre-request {
+  base-mcp-url: http://localhost:3003
+}

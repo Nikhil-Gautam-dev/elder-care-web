@@ -1,0 +1,32 @@
+meta {
+  name: Create Ride (API key)
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{ridesUrl}}/rides
+  body: json
+  auth: none
+}
+headers {
+  X-API-Key: {{ridesApiKey}}
+}
+
+body:json {
+  {
+    "pickup": { "address": "14 Green Valley Road, Delhi", "lat": 28.6139, "lng": 77.209 },
+    "drop": { "address": "Apollo Hospital, Sarita Vihar", "lat": 28.5355, "lng": 77.391 },
+    "rider": { "name": "Sunita Sharma", "phone": "9876543210" },
+    "scheduledAt": null,
+    "notes": "Wheelchair, needs help getting in",
+    "requestId": "demo-ride-1",
+    "externalRef": { "elderId": "demo" }
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.data) {
+    bru.setVar("rideId", res.body.data.id);
+  }
+}

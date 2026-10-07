@@ -3,6 +3,14 @@ import { withRetry, type LlmMessage, type LlmProvider, type LlmTool } from '../l
 import type { ElderCareMcpClient } from '../mcp/client.js';
 import { SYSTEM_PROMPT } from './prompt.js';
 
+/** The model has no clock; rides need "today" and "5 pm" turned into real times. */
+const nowLine = (): string =>
+  `Right now it is ${new Date().toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    dateStyle: 'full',
+    timeStyle: 'short',
+  })} in India (UTC+05:30). Use this to turn "today", "tomorrow" or "5 pm" into exact times.`;
+
 const MAX_ITERATIONS = 10;
 
 type ToolSchema = { properties?: Record<string, unknown>; required?: string[] } & Record<
@@ -55,7 +63,12 @@ export class ElderCareAgent {
 
     for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       const turn = await withRetry(
-        () => this.llm.generate({ system: SYSTEM_PROMPT, messages: this.messages, tools }),
+        () =>
+          this.llm.generate({
+            system: `${SYSTEM_PROMPT}\n\n${nowLine()}`,
+            messages: this.messages,
+            tools,
+          }),
         this.llm.name,
       );
 
