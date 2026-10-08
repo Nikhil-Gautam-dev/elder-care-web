@@ -28,6 +28,7 @@ import {
   listRides,
   cancelRide,
 } from '../tools/index.js';
+import { preview } from '../logger.js';
 import type { ToolResult } from '../tools/result.js';
 
 const authSchema = z
@@ -65,16 +66,18 @@ export function createMcpServer(): McpServer {
   ) => unknown;
   server.registerTool = ((name, config, handler) =>
     registerTool(name, config, async (...args: unknown[]) => {
+      const started = Date.now();
+      const { auth, ...input } = (args[0] ?? {}) as { auth?: { id?: string } };
+      console.info(`[MCP] → tool ${name} auth=${auth?.id ?? 'none'} args=${preview(input)}`);
       try {
-        return await (handler as (...a: unknown[]) => Promise<unknown>)(...args);
+        const result = await (handler as (...a: unknown[]) => Promise<unknown>)(...args);
+        console.info(`[MCP] ← tool ${name} (${Date.now() - started}ms) result=${preview(result)}`);
+        return result;
       } catch (err) {
-        console.error(`[MCP] ${name} failed:`, err);
+        console.error(`[MCP] ✗ tool ${name} failed after ${Date.now() - started}ms:`, err);
         throw err;
       }
     })) as typeof server.registerTool;
-
-  const log = (name: string, auth: RawAuth) =>
-    console.info(`[MCP] ${name} auth=${auth?.id ?? 'none'}`);
 
   server.registerTool(
     'get_profile',
@@ -85,7 +88,6 @@ export function createMcpServer(): McpServer {
       inputSchema: { person, auth: authSchema },
     },
     async ({ person, auth }) => {
-      log('get_profile', auth);
       return reply(await getProfile(person, toAuth(auth)));
     },
   );
@@ -99,7 +101,6 @@ export function createMcpServer(): McpServer {
       inputSchema: { auth: authSchema },
     },
     async ({ auth }) => {
-      log('get_family_members', auth);
       return reply(await getFamilyMembers(toAuth(auth)));
     },
   );
@@ -113,7 +114,6 @@ export function createMcpServer(): McpServer {
       inputSchema: { auth: authSchema },
     },
     async ({ auth }) => {
-      log('get_pending_invites', auth);
       return reply(await getPendingInvites(toAuth(auth)));
     },
   );
@@ -130,7 +130,6 @@ export function createMcpServer(): McpServer {
       },
     },
     async ({ unreadOnly, auth }) => {
-      log('get_notifications', auth);
       return reply(await getNotifications(unreadOnly ?? false, toAuth(auth)));
     },
   );
@@ -147,7 +146,6 @@ export function createMcpServer(): McpServer {
       },
     },
     async ({ message, auth }) => {
-      log('send_family_notification', auth);
       return reply(await sendFamilyNotification(message, toAuth(auth)));
     },
   );
@@ -165,7 +163,6 @@ export function createMcpServer(): McpServer {
       },
     },
     async ({ person, alias, auth }) => {
-      log('set_alias', auth);
       return reply(await setAlias(person, alias, toAuth(auth)));
     },
   );
@@ -186,7 +183,6 @@ export function createMcpServer(): McpServer {
       },
     },
     async ({ auth, ...args }) => {
-      log('set_address', auth);
       return reply(await setAddress(args, toAuth(auth)));
     },
   );
@@ -222,7 +218,6 @@ export function createMcpServer(): McpServer {
       },
     },
     async ({ person, includeStopped, auth }) => {
-      log('list_medications', auth);
       return reply(await listMedications(person, includeStopped ?? false, toAuth(auth)));
     },
   );
@@ -245,7 +240,6 @@ export function createMcpServer(): McpServer {
       },
     },
     async ({ person, medication, auth, ...args }) => {
-      log('save_medication', auth);
       const who = toAuth(auth);
       if (medication) return reply(await updateMedication(person, medication, args, who));
       if (!args.name)
@@ -266,7 +260,6 @@ export function createMcpServer(): McpServer {
       },
     },
     async ({ person, medication, auth }) => {
-      log('stop_medication', auth);
       return reply(await stopMedication(person, medication, toAuth(auth)));
     },
   );
@@ -288,7 +281,6 @@ export function createMcpServer(): McpServer {
       },
     },
     async ({ person, medication, amount, auth }) => {
-      log('log_dose', auth);
       return reply(await logDose(person, medication, amount, toAuth(auth)));
     },
   );
@@ -306,7 +298,6 @@ export function createMcpServer(): McpServer {
       },
     },
     async ({ person, medication, auth }) => {
-      log('undo_last_dose', auth);
       return reply(await undoLastDose(person, medication, toAuth(auth)));
     },
   );
@@ -321,7 +312,6 @@ export function createMcpServer(): McpServer {
       inputSchema: { query: z.string().min(2), auth: authSchema },
     },
     async ({ query, auth }) => {
-      log('search_medicine', auth);
       return reply(await searchMedicine(query, toAuth(auth)));
     },
   );
@@ -347,7 +337,6 @@ export function createMcpServer(): McpServer {
       },
     },
     async ({ person, items, auth }) => {
-      log('prepare_order', auth);
       return reply(await prepareOrder(person, items, toAuth(auth)));
     },
   );
@@ -361,7 +350,6 @@ export function createMcpServer(): McpServer {
       inputSchema: { draftId: z.string(), auth: authSchema },
     },
     async ({ draftId, auth }) => {
-      log('place_order', auth);
       return reply(await placeOrder(draftId, toAuth(auth)));
     },
   );
@@ -374,7 +362,6 @@ export function createMcpServer(): McpServer {
       inputSchema: { person, orderNumber: z.string().optional(), auth: authSchema },
     },
     async ({ person, orderNumber, auth }) => {
-      log('get_order_status', auth);
       return reply(await getOrderStatus(person, orderNumber, toAuth(auth)));
     },
   );
@@ -387,7 +374,6 @@ export function createMcpServer(): McpServer {
       inputSchema: { person, orderNumber: z.string(), auth: authSchema },
     },
     async ({ person, orderNumber, auth }) => {
-      log('cancel_order', auth);
       return reply(await cancelOrder(person, orderNumber, toAuth(auth)));
     },
   );
@@ -414,7 +400,6 @@ export function createMcpServer(): McpServer {
       },
     },
     async ({ person, auth, ...args }) => {
-      log('prepare_ride', auth);
       return reply(await prepareRide(person, args, toAuth(auth)));
     },
   );
@@ -428,7 +413,6 @@ export function createMcpServer(): McpServer {
       inputSchema: { draftId: z.string(), auth: authSchema },
     },
     async ({ draftId, auth }) => {
-      log('book_ride', auth);
       return reply(await bookRide(draftId, toAuth(auth)));
     },
   );
@@ -442,7 +426,6 @@ export function createMcpServer(): McpServer {
       inputSchema: { person, rideNumber: z.string().optional(), auth: authSchema },
     },
     async ({ person, rideNumber, auth }) => {
-      log('get_ride_status', auth);
       return reply(await getRideStatus(person, rideNumber, toAuth(auth)));
     },
   );
@@ -455,7 +438,6 @@ export function createMcpServer(): McpServer {
       inputSchema: { person, auth: authSchema },
     },
     async ({ person, auth }) => {
-      log('list_rides', auth);
       return reply(await listRides(person, toAuth(auth)));
     },
   );
@@ -469,7 +451,6 @@ export function createMcpServer(): McpServer {
       inputSchema: { person, rideNumber: z.string().optional(), auth: authSchema },
     },
     async ({ person, rideNumber, auth }) => {
-      log('cancel_ride', auth);
       return reply(await cancelRide(person, rideNumber, toAuth(auth)));
     },
   );

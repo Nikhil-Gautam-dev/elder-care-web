@@ -1,5 +1,6 @@
 import 'express-async-errors';
 import 'dotenv/config';
+import './logger.js';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
@@ -16,7 +17,7 @@ const app = express();
 
 app.use(cors());
 app.use(
-  morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev', {
+  morgan(':date[iso] :method :url :status :response-time ms - :res[content-length]', {
     skip: (req) => req.path === '/health',
   }),
 );

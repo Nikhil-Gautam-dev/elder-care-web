@@ -1,3 +1,5 @@
+import { loggedFetch } from '../logger.js';
+
 /** Thin client for the independent ElderCare Rides REST API (API-key authenticated). */
 
 export class RidesError extends Error {
@@ -47,7 +49,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}${path}`, {
+    response = await loggedFetch('rides-client', `${baseUrl}${path}`, {
       method,
       headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
       body: body === undefined ? undefined : JSON.stringify(body),

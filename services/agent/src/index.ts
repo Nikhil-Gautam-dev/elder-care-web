@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import './logger.js';
 
 import express, { type Request, type Response } from 'express';
 import cors from 'cors';
@@ -61,6 +62,17 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use((req, res, next) => {
+  if (req.path === '/health') return next();
+  const started = Date.now();
+  console.info(`[agent] → ${req.method} ${req.originalUrl}`);
+  res.on('finish', () =>
+    console.info(
+      `[agent] ← ${res.statusCode} ${req.method} ${req.originalUrl} (${Date.now() - started}ms)`,
+    ),
+  );
+  next();
+});
 
 app.get('/health', (_req: Request, res: Response) => {
   res.json({

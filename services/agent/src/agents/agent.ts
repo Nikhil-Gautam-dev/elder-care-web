@@ -62,6 +62,10 @@ export class ElderCareAgent {
     const tools = await this.loadTools();
 
     for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+      const llmStarted = Date.now();
+      console.info(
+        `[agent] → ${this.llm.name}/${this.llm.model} generate iteration=${iteration} messages=${this.messages.length}`,
+      );
       const turn = await withRetry(
         () =>
           this.llm.generate({
@@ -70,6 +74,10 @@ export class ElderCareAgent {
             tools,
           }),
         this.llm.name,
+      );
+
+      console.info(
+        `[agent] ← ${this.llm.name}/${this.llm.model} (${Date.now() - llmStarted}ms) toolCalls=${turn.toolCalls.map((c) => c.name).join(',') || 'none'}`,
       );
 
       if (turn.usage?.inputTokens !== undefined) {

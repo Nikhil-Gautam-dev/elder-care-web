@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import './logger.js';
 
 import { createServer } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -10,6 +11,16 @@ const mcpServer = createMcpServer();
 const PORT = Number(process.env['PORT'] ?? 3003);
 
 const httpServer = createServer(async (req, res) => {
+  if (req.url === '/mcp') {
+    const started = Date.now();
+    console.info(`[MCP] → HTTP ${req.method} ${req.url} from ${req.socket.remoteAddress}`);
+    res.on('finish', () =>
+      console.info(
+        `[MCP] ← HTTP ${res.statusCode} ${req.method} ${req.url} (${Date.now() - started}ms)`,
+      ),
+    );
+  }
+
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
