@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/rides-api/:path*",
-      "destination": "https://elder-care-rides.onrender.com/:path*"
+      "destination": "https://api.nikhilgautam.me/elder-care-rides/:path*"
     },
     { "source": "/(.*)", "destination": "/index.html" }
   ]

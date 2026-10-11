@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/pharmacy-api/:path*",
-      "destination": "https://elder-care-pharmacy.onrender.com/:path*"
+      "destination": "https://api.nikhilgautam.me/elder-care-pharmacy/:path*"
     },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
