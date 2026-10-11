@@ -27,12 +27,12 @@ import {
 const withoutUndefined = <T extends object>(value: T): T =>
   Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
 
-function toObjectId(id: string | undefined, label = 'ID'): ObjectId {
+export function toObjectId(id: string | undefined, label = 'ID'): ObjectId {
   if (!id || !ObjectId.isValid(id)) throw createError(`Invalid ${label}: ${id ?? ''}`, 400);
   return new ObjectId(id);
 }
 
-function requireCaller(req: Request): { id: ObjectId; isAdmin: boolean } {
+export function requireCaller(req: Request): { id: ObjectId; isAdmin: boolean } {
   if (!req.user?.id) throw createError('Unauthorized', 401);
   return { id: new ObjectId(req.user.id), isAdmin: req.user.role === 'admin' };
 }
@@ -47,7 +47,7 @@ interface Access {
  * View: the elder, anyone in the same family, or an admin.
  * Manage: the elder, an admin, or a family member whose `canManageOrders` is on for an elder.
  */
-async function accessTo(
+export async function accessTo(
   caller: { id: ObjectId; isAdmin: boolean },
   elderId: ObjectId,
 ): Promise<Access> {

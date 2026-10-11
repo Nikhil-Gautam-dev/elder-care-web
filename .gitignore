@@ -37,6 +37,7 @@ Thumbs.db
 *.swp
 *.swo
 CLAUDE.md
+design.md
 
 # ─── TypeScript ──────────────────────────────────────────────────────────────
 *.tsbuildinfo

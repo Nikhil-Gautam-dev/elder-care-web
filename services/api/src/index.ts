@@ -12,6 +12,7 @@ import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import familyRoutes from './routes/familyInvite.routes.js';
 import { medicationRoutes, pharmacyOrderRoutes } from './routes/medication.routes.js';
+import { rideRoutes, notificationRoutes } from './routes/careFeed.routes.js';
 
 const app = express();
 
@@ -28,6 +29,8 @@ app.use('/users', userRoutes);
 app.use('/family', familyRoutes);
 app.use('/medications', medicationRoutes);
 app.use('/pharmacy-orders', pharmacyOrderRoutes);
+app.use('/rides', rideRoutes);
+app.use('/notifications', notificationRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ success: false, error: 'Route not found' });

@@ -134,7 +134,7 @@ export const HealthCheck: React.FC = () => {
         style={{
           position: 'fixed',
           right: 8,
-          bottom: 8,
+          bottom: 'calc(8px + var(--bottom-nav-height))',
           width: 24,
           height: 24,
           borderRadius: '50%',
@@ -161,7 +161,7 @@ export const HealthCheck: React.FC = () => {
           style={{
             position: 'fixed',
             right: 12,
-            bottom: 40,
+            bottom: 'calc(40px + var(--bottom-nav-height))',
             width: 320,
             maxWidth: 'calc(100vw - 24px)',
             background: 'var(--card-bg)',

@@ -1,20 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertCircle, MessageSquare, Package, Pill, Plus } from 'lucide-react';
-import {
-  DAY_SLOTS,
-  FOOD_TIMINGS,
-  MEDICATION_FORMS,
-  type DaySlot,
-  type FamilyView,
-  type FoodTiming,
-  type IMedicationView,
-  type IPharmacyOrder,
-  type MedicationForm,
-} from '@eldercare/shared';
+import { Mic, Plus, Package } from 'lucide-react';
+import type { FamilyView, IDoseLog, IMedicationView, IPharmacyOrder } from '@eldercare/shared';
 import {
   createMedication,
   getMyFamily,
+  listDoses,
   listMedications,
   listPharmacyOrders,
   logDose,
@@ -23,90 +14,70 @@ import {
   updateMedication,
 } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import {
+  Button,
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  Notice,
+  PageHeader,
+  StatusBadge,
+} from '../components/ui';
+import { MedicineCard } from '../components/medicines/MedicineCard';
+import {
+  MedicineForm,
+  emptyForm,
+  formFromMedication,
+  type FormState,
+} from '../components/medicines/MedicineForm';
+import {
+  countWithUnit,
+  doseState,
+  isSameDay,
+  ORDER_LABEL,
+  type DoseState,
+} from '../utils/careStatus';
 
-const FOOD_LABELS: Record<FoodTiming, string> = {
-  any: 'Any time',
-  before: 'Before food',
-  after: 'After food',
-  with: 'With food',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  placed: 'Waiting for the pharmacy',
-  accepted: 'Being prepared',
-  packed: 'Packed',
-  out_for_delivery: 'Out for delivery',
-  delivered: 'Delivered',
-  rejected: 'Rejected',
-  cancelled: 'Cancelled',
-};
-
-interface FormState {
-  name: string;
-  genericName: string;
-  strength: string;
-  form: MedicationForm;
-  doseAmount: string;
-  doseUnit: string;
-  slots: DaySlot[];
-  asNeeded: boolean;
-  food: FoodTiming;
-  instructions: string;
-  unitsPerPack: string;
-  unitsOnHand: string;
-  refillAtDays: string;
-  prescribedBy: string;
+/** Changes that alter how a medicine is taken: these need a second, explicit confirmation. */
+function materialChanges(before: FormState, after: FormState): string[] {
+  const out: string[] = [];
+  const slots = (f: FormState) =>
+    f.asNeeded ? 'only when needed' : [...f.slots].sort().join(', ');
+  if (before.strength.trim() !== after.strength.trim())
+    out.push(`Strength: ${before.strength} → ${after.strength}`);
+  if (Number(before.doseAmount) !== Number(after.doseAmount) || before.doseUnit !== after.doseUnit)
+    out.push(
+      `Amount each time: ${before.doseAmount} ${before.doseUnit} → ${after.doseAmount} ${after.doseUnit}`,
+    );
+  if (slots(before) !== slots(after)) out.push(`When: ${slots(before)} → ${slots(after)}`);
+  if (before.food !== after.food) out.push(`Food: ${before.food} → ${after.food}`);
+  return out;
 }
-
-const emptyForm: FormState = {
-  name: '',
-  genericName: '',
-  strength: '',
-  form: 'tablet',
-  doseAmount: '1',
-  doseUnit: 'tablet',
-  slots: ['morning'],
-  asNeeded: false,
-  food: 'any',
-  instructions: '',
-  unitsPerPack: '10',
-  unitsOnHand: '0',
-  refillAtDays: '5',
-  prescribedBy: '',
-};
-
-const formFromMedication = (m: IMedicationView): FormState => ({
-  name: m.name,
-  genericName: m.genericName ?? '',
-  strength: m.strength,
-  form: m.form,
-  doseAmount: String(m.dose.amount),
-  doseUnit: m.dose.unit,
-  slots: m.schedule.slots,
-  asNeeded: m.schedule.asNeeded,
-  food: m.schedule.food,
-  instructions: m.schedule.instructions ?? '',
-  unitsPerPack: String(m.supply.unitsPerPack),
-  unitsOnHand: String(Math.round(m.supplyStatus.unitsLeft)),
-  refillAtDays: String(m.supply.refillThresholdDays),
-  prescribedBy: m.prescribedBy ?? '',
-});
 
 export const MedicationsPage: React.FC = () => {
   const { userId } = useAuth();
   const [family, setFamily] = useState<FamilyView | null>(null);
   const [elderId, setElderId] = useState<string>('');
   const [medications, setMedications] = useState<IMedicationView[]>([]);
+  const [recorded, setRecorded] = useState<Record<string, number | null>>({});
   const [orders, setOrders] = useState<IPharmacyOrder[]>([]);
-  const [canManage, setCanManage] = useState<boolean>(false);
+  const [canManage, setCanManage] = useState(false);
+  const [showStopped, setShowStopped] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [editing, setEditing] = useState<IMedicationView | 'new' | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [initialOnHand, setInitialOnHand] = useState<string>('');
-  const [saving, setSaving] = useState<boolean>(false);
+  const [initialForm, setInitialForm] = useState<FormState>(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [slotError, setSlotError] = useState<string | null>(null);
+  const [pendingChanges, setPendingChanges] = useState<string[] | null>(null);
+  const [stopping, setStopping] = useState<IMedicationView | null>(null);
+  const [stopBusy, setStopBusy] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  /** Medicine whose dose is being logged/undone, and the one just logged (offers Undo). */
   const [taking, setTaking] = useState<string | null>(null);
   const [undoable, setUndoable] = useState<string | null>(null);
 
@@ -124,20 +95,37 @@ export const MedicationsPage: React.FC = () => {
 
   const targetId = elderId || userId || '';
 
-  const load = async (id: string) => {
+  const todayCount = (doses: IDoseLog[]) =>
+    doses.filter((d) => !d.undoneAt && isSameDay(new Date(d.takenAt), new Date())).length;
+
+  const load = useCallback(async (id: string, withStopped: boolean) => {
     if (!id) return;
+    setLoading(true);
+    setLoadError(null);
     try {
       const [meds, pharmacyOrders] = await Promise.all([
-        listMedications(id),
+        listMedications(id, withStopped),
         listPharmacyOrders(id),
       ]);
       setMedications(meds.items);
       setCanManage(meds.canManage);
       setOrders(pharmacyOrders);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load medicines');
+      // Doses are looked up per medicine. A failed lookup stays "unknown": we never guess "taken".
+      const counts = await Promise.all(
+        meds.items
+          .filter((m) => m.active)
+          .map(async (m) => {
+            const doses = await listDoses(m._id, 10).catch(() => null);
+            return [m._id, doses ? todayCount(doses) : null] as const;
+          }),
+      );
+      setRecorded(Object.fromEntries(counts));
+    } catch (err) {
+      setLoadError((err as Error).message || 'Failed to load medicines');
+    } finally {
+      setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     getMyFamily()
@@ -148,12 +136,18 @@ export const MedicationsPage: React.FC = () => {
   useEffect(() => {
     setEditing(null);
     setError(null);
-    load(targetId);
-  }, [targetId]);
+    setSuccess(null);
+    setUndoable(null);
+    void load(targetId, showStopped);
+  }, [targetId, showStopped, load]);
+
+  const stateOf = (m: IMedicationView): DoseState => doseState(m, recorded[m._id] ?? null);
 
   const startAdd = () => {
     setForm(emptyForm);
-    setInitialOnHand(emptyForm.unitsOnHand);
+    setInitialForm(emptyForm);
+    setFormError(null);
+    setSlotError(null);
     setEditing('new');
     setSuccess(null);
   };
@@ -161,29 +155,22 @@ export const MedicationsPage: React.FC = () => {
   const startEdit = (m: IMedicationView) => {
     const state = formFromMedication(m);
     setForm(state);
-    setInitialOnHand(state.unitsOnHand);
+    setInitialForm(state);
+    setFormError(null);
+    setSlotError(null);
     setEditing(m);
     setSuccess(null);
   };
 
-  const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
+  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
+    if (key === 'slots' || key === 'asNeeded') setSlotError(null);
+  };
 
-  const toggleSlot = (slot: DaySlot) =>
-    set(
-      'slots',
-      form.slots.includes(slot) ? form.slots.filter((s) => s !== slot) : [...form.slots, slot],
-    );
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
+  const save = async () => {
+    if (!editing) return;
+    setFormError(null);
     setSuccess(null);
-
-    if (!form.asNeeded && form.slots.length === 0) {
-      setError('Pick when it is taken, or tick "Only when needed".');
-      return;
-    }
 
     const common = {
       name: form.name.trim(),
@@ -213,43 +200,72 @@ export const MedicationsPage: React.FC = () => {
           },
         });
         setSuccess(`${common.name} was saved.`);
-      } else if (editing) {
+      } else {
         await updateMedication(editing._id, {
           ...common,
           supply: {
             unitsPerPack: Number(form.unitsPerPack),
             refillThresholdDays: Number(form.refillAtDays),
             // Only reset the count when the person actually changed it.
-            ...(form.unitsOnHand !== initialOnHand
+            ...(form.unitsOnHand !== initialForm.unitsOnHand
               ? { unitsRemaining: Number(form.unitsOnHand) }
               : {}),
           },
         });
         setSuccess(`${common.name} was updated.`);
       }
+      setPendingChanges(null);
       setEditing(null);
-      await load(targetId);
-    } catch (err: any) {
-      setError(err.message || 'Could not save the medicine');
+      await load(targetId, showStopped);
+    } catch (err) {
+      // Keep everything the person typed so they can fix it and try again.
+      setPendingChanges(null);
+      setFormError((err as Error).message || 'Could not save the medicine');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleStop = async (m: IMedicationView) => {
-    if (!window.confirm(`Stop ${m.name}? It stays in the history but won't be reordered.`)) return;
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.asNeeded && form.slots.length === 0) {
+      setSlotError('Choose when it is taken, or tick “Only when needed”.');
+      return;
+    }
+    if (editing && editing !== 'new') {
+      const changes = materialChanges(initialForm, form);
+      if (changes.length > 0) {
+        setPendingChanges(changes);
+        return;
+      }
+    }
+    void save();
+  };
+
+  const confirmStop = async () => {
+    if (!stopping) return;
+    setStopBusy(true);
     setError(null);
     try {
-      await stopMedication(m._id);
-      setSuccess(`${m.name} was stopped.`);
-      await load(targetId);
-    } catch (err: any) {
-      setError(err.message || 'Could not stop the medicine');
+      await stopMedication(stopping._id);
+      setSuccess(`${stopping.name} was stopped. It stays in the history but won't be reordered.`);
+      setStopping(null);
+      await load(targetId, showStopped);
+    } catch (err) {
+      setStopping(null);
+      setError((err as Error).message || 'Could not stop the medicine');
+    } finally {
+      setStopBusy(false);
     }
   };
 
   const replaceMedication = (updated: IMedicationView) =>
     setMedications((list) => list.map((x) => (x._id === updated._id ? updated : x)));
+
+  const refreshRecorded = async (id: string) => {
+    const doses = await listDoses(id, 10).catch(() => null);
+    setRecorded((r) => ({ ...r, [id]: doses ? todayCount(doses) : null }));
+  };
 
   const handleTake = async (m: IMedicationView) => {
     setError(null);
@@ -258,12 +274,13 @@ export const MedicationsPage: React.FC = () => {
     try {
       const { medication } = await logDose(m._id, { requestId: crypto.randomUUID() });
       replaceMedication(medication);
+      await refreshRecorded(m._id);
       setSuccess(
-        `Marked ${m.name} as taken. ${medication.supplyStatus.unitsLeft} ${m.dose.unit} left.`,
+        `Recorded: you took ${m.name}. ${countWithUnit(medication.supplyStatus.unitsLeft, m.dose.unit)} left.`,
       );
       setUndoable(m._id);
-    } catch (err: any) {
-      setError(err.message || 'Could not mark the dose as taken');
+    } catch (err) {
+      setError((err as Error).message || 'Could not record the dose');
     } finally {
       setTaking(null);
     }
@@ -276,37 +293,43 @@ export const MedicationsPage: React.FC = () => {
     try {
       const { medication } = await undoLastDose(m._id);
       replaceMedication(medication);
+      await refreshRecorded(m._id);
       setSuccess(
-        `Undid the last ${m.name} dose. ${medication.supplyStatus.unitsLeft} ${m.dose.unit} left.`,
+        `Undone: the last ${m.name} record was removed. ${countWithUnit(medication.supplyStatus.unitsLeft, m.dose.unit)} left.`,
       );
       setUndoable(null);
-    } catch (err: any) {
-      setError(err.message || 'Could not undo the dose');
+    } catch (err) {
+      setError((err as Error).message || 'Could not undo the dose');
     } finally {
       setTaking(null);
     }
   };
 
-  const supplyBadge = (m: IMedicationView) => {
-    const { daysLeft, needsRefill, unitsLeft } = m.supplyStatus;
-    if (unitsLeft <= 0) return 'None left';
-    const count = `${unitsLeft} left`;
-    if (daysLeft === null) return count;
-    return `${count} (about ${daysLeft} day${daysLeft === 1 ? '' : 's'})${needsRefill ? ' — running low' : ''}`;
-  };
+  const active = medications.filter((m) => m.active);
+  const scheduled = active.filter((m) => !m.schedule.asNeeded);
+  const shown = showStopped ? medications : active;
 
   return (
     <div>
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 700 }}>Medicines</h1>
-        <p style={{ color: 'var(--text-secondary)' }}>
-          Keep doses and schedules in one place. You can also just tell the assistant, for example
-          &ldquo;order my sugar tablets&rdquo;.
-        </p>
-      </div>
+      <PageHeader
+        title="Medicines"
+        subtitle="Your medicines, today's doses and orders in one place."
+        actions={
+          <>
+            <Link to="/assistant?ask=Order my usual medicine" className="btn btn-primary">
+              <Mic size={18} aria-hidden="true" /> Order medicine
+            </Link>
+            {canManage && !loading && (
+              <Button variant="secondary" onClick={startAdd}>
+                <Plus size={18} aria-hidden="true" /> Add a medicine
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {people.length > 1 && (
-        <div className="form-group" style={{ maxWidth: '22rem' }}>
+        <div className="form-group" style={{ maxWidth: '24rem' }}>
           <label className="form-label" htmlFor="person-select">
             Whose medicines
           </label>
@@ -325,430 +348,212 @@ export const MedicationsPage: React.FC = () => {
         </div>
       )}
 
-      {error && (
-        <div
-          style={{
-            background: 'var(--danger-light)',
-            color: 'var(--danger)',
-            padding: '0.75rem 1rem',
-            borderRadius: 'var(--radius-sm)',
-            marginBottom: '1.5rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-          }}
-        >
-          <AlertCircle size={18} />
-          <span>{error}</span>
-        </div>
-      )}
-      {success && (
-        <div
-          style={{
-            background: 'var(--success-light)',
-            color: 'var(--success)',
-            padding: '0.75rem 1rem',
-            borderRadius: 'var(--radius-sm)',
-            marginBottom: '1.5rem',
-          }}
-        >
-          {success}
-        </div>
-      )}
+      {error && <Notice kind="error">{error}</Notice>}
+      {success && <Notice kind="success">{success}</Notice>}
 
-      <div className="card">
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '1rem',
-            gap: '1rem',
-            flexWrap: 'wrap',
-          }}
-        >
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 600, display: 'flex', gap: '0.5rem' }}>
-            <Pill size={20} style={{ color: 'var(--primary)' }} />
-            <span>Current medicines ({medications.length})</span>
-          </h2>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <Link to="/assistant" className="btn btn-secondary">
-              <MessageSquare size={16} /> Order with assistant
-            </Link>
-            {canManage && (
-              <button type="button" className="btn btn-primary" onClick={startAdd}>
-                <Plus size={16} /> Add medicine
-              </button>
+      {loadError ? (
+        <ErrorState
+          title="We couldn't load the medicines"
+          message={loadError}
+          onRetry={() => void load(targetId, showStopped)}
+        />
+      ) : loading && medications.length === 0 ? (
+        <div className="card" role="status">
+          Checking your medicines…
+        </div>
+      ) : (
+        <>
+          <section className="card" aria-labelledby="today-title">
+            <h2 id="today-title" className="section-title">
+              Today&apos;s schedule
+            </h2>
+            {scheduled.length === 0 ? (
+              <p style={{ color: 'var(--text-secondary)' }}>
+                {active.length === 0
+                  ? 'Nothing scheduled yet.'
+                  : 'Your medicines are taken only when needed, so nothing is scheduled.'}
+              </p>
+            ) : (
+              <>
+                <ul style={{ listStyle: 'none' }}>
+                  {scheduled.map((m) => {
+                    const s = stateOf(m);
+                    return (
+                      <li key={m._id} className="today-row">
+                        <span>
+                          <strong>
+                            {m.name} {m.strength}
+                          </strong>
+                          <br />
+                          <span className="med-meta">{m.summary}</span>
+                        </span>
+                        {s.kind === 'due' ? (
+                          <StatusBadge status="warning">Due now</StatusBadge>
+                        ) : s.kind === 'taken' ? (
+                          <StatusBadge status="success">Recorded as taken</StatusBadge>
+                        ) : s.kind === 'upcoming' ? (
+                          <StatusBadge status="info">Upcoming: {s.next}</StatusBadge>
+                        ) : (
+                          <StatusBadge status="neutral">Not checked</StatusBadge>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <p className="form-hint">
+                  “Mark as taken” saves what you tell us. It does not check that the medicine was
+                  actually taken.
+                </p>
+              </>
             )}
-          </div>
-        </div>
+          </section>
 
-        {!canManage && medications.length > 0 && (
-          <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-            You can see these medicines but only family members with order permission can change
-            them.
-          </p>
-        )}
+          {editing && (
+            <MedicineForm
+              title={editing === 'new' ? 'Add a medicine' : `Edit ${editing.name}`}
+              form={form}
+              isNew={editing === 'new'}
+              saving={saving}
+              error={formError}
+              slotError={slotError}
+              onChange={set}
+              onSubmit={handleSubmit}
+              onCancel={() => setEditing(null)}
+            />
+          )}
 
-        {medications.length === 0 ? (
-          <p style={{ color: 'var(--text-secondary)', padding: '1rem 0' }}>
-            No medicines saved yet.
-            {canManage ? ' Add one to let the assistant help with refills.' : ''}
-          </p>
-        ) : (
-          <div style={{ display: 'grid', gap: '1rem' }}>
-            {medications.map((m) => (
-              <div
-                key={m._id}
-                style={{
-                  padding: '1rem',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--bg-color)',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    gap: '1rem',
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '1.05rem' }}>
-                      {m.name} {m.strength}
-                    </div>
-                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                      {m.summary}
-                    </div>
-                    {(m.genericName || m.prescribedBy) && (
-                      <div
-                        style={{
-                          color: 'var(--text-muted)',
-                          fontSize: '0.8rem',
-                          marginTop: '0.2rem',
-                        }}
-                      >
-                        {[
-                          m.genericName,
-                          m.prescribedBy && `Dr. ${m.prescribedBy.replace(/^dr\.?\s*/i, '')}`,
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <span
-                      className={`badge ${m.supplyStatus.needsRefill ? 'badge-warning' : 'badge-success'}`}
-                    >
-                      <Package size={12} /> {supplyBadge(m)}
-                    </span>
-                  </div>
-                </div>
-
-                {canManage && (
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
-                      disabled={taking === m._id || m.supplyStatus.unitsLeft < m.dose.amount}
-                      onClick={() => handleTake(m)}
-                    >
-                      Mark taken
-                    </button>
-                    {undoable === m._id && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
-                        disabled={taking === m._id}
-                        onClick={() => handleUndo(m)}
-                      >
-                        Undo
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
-                      onClick={() => startEdit(m)}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-danger"
-                      style={{ padding: '0.25rem 0.6rem', fontSize: '0.8rem' }}
-                      onClick={() => handleStop(m)}
-                    >
-                      Stop
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {editing && (
-        <div className="card">
-          <h2 style={{ fontSize: '1.15rem', fontWeight: 600, marginBottom: '1rem' }}>
-            {editing === 'new' ? 'Add a medicine' : `Edit ${editing.name}`}
-          </h2>
-          <form onSubmit={handleSave}>
-            <div className="grid-2">
-              <div className="form-group">
-                <label className="form-label" htmlFor="med-name">
-                  Name
-                </label>
-                <input
-                  id="med-name"
-                  className="input-field"
-                  placeholder="e.g. Metformin or Glycomet"
-                  value={form.name}
-                  onChange={(e) => set('name', e.target.value)}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="med-strength">
-                  Strength
-                </label>
-                <input
-                  id="med-strength"
-                  className="input-field"
-                  placeholder="e.g. 500 mg"
-                  value={form.strength}
-                  onChange={(e) => set('strength', e.target.value)}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="med-form">
-                  Type
-                </label>
-                <select
-                  id="med-form"
-                  className="input-field"
-                  value={form.form}
-                  onChange={(e) => set('form', e.target.value as MedicationForm)}
-                >
-                  {MEDICATION_FORMS.map((f) => (
-                    <option key={f} value={f}>
-                      {f.charAt(0).toUpperCase() + f.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="med-generic">
-                  Generic name (optional)
-                </label>
-                <input
-                  id="med-generic"
-                  className="input-field"
-                  value={form.genericName}
-                  onChange={(e) => set('genericName', e.target.value)}
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="med-dose">
-                  How much each time
-                </label>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <input
-                    id="med-dose"
-                    type="number"
-                    min="0.25"
-                    step="0.25"
-                    className="input-field"
-                    style={{ width: '6rem' }}
-                    value={form.doseAmount}
-                    onChange={(e) => set('doseAmount', e.target.value)}
-                    required
-                  />
-                  <input
-                    className="input-field"
-                    placeholder="tablet, ml…"
-                    value={form.doseUnit}
-                    onChange={(e) => set('doseUnit', e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="med-food">
-                  With food?
-                </label>
-                <select
-                  id="med-food"
-                  className="input-field"
-                  value={form.food}
-                  onChange={(e) => set('food', e.target.value as FoodTiming)}
-                >
-                  {FOOD_TIMINGS.map((f) => (
-                    <option key={f} value={f}>
-                      {FOOD_LABELS[f]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">When is it taken?</label>
-              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-                {DAY_SLOTS.map((slot) => (
-                  <label key={slot} style={{ display: 'flex', gap: '0.4rem', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={form.slots.includes(slot)}
-                      disabled={form.asNeeded}
-                      onChange={() => toggleSlot(slot)}
-                    />
-                    <span style={{ textTransform: 'capitalize' }}>{slot}</span>
-                  </label>
-                ))}
-                <label style={{ display: 'flex', gap: '0.4rem', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={form.asNeeded}
-                    onChange={(e) => set('asNeeded', e.target.checked)}
-                  />
-                  <span>Only when needed</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="grid-2">
-              <div className="form-group">
-                <label className="form-label" htmlFor="med-pack">
-                  Units in one pack
-                </label>
-                <input
-                  id="med-pack"
-                  type="number"
-                  min="1"
-                  className="input-field"
-                  value={form.unitsPerPack}
-                  onChange={(e) => set('unitsPerPack', e.target.value)}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="med-onhand">
-                  How many do you have now?
-                </label>
-                <input
-                  id="med-onhand"
-                  type="number"
-                  min="0"
-                  className="input-field"
-                  value={form.unitsOnHand}
-                  onChange={(e) => set('unitsOnHand', e.target.value)}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="med-refill">
-                  Remind to reorder when days left is
-                </label>
-                <input
-                  id="med-refill"
-                  type="number"
-                  min="0"
-                  max="60"
-                  className="input-field"
-                  value={form.refillAtDays}
-                  onChange={(e) => set('refillAtDays', e.target.value)}
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="med-doctor">
-                  Prescribed by (optional)
-                </label>
-                <input
-                  id="med-doctor"
-                  className="input-field"
-                  value={form.prescribedBy}
-                  onChange={(e) => set('prescribedBy', e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="med-notes">
-                Notes (optional)
-              </label>
-              <input
-                id="med-notes"
-                className="input-field"
-                placeholder="e.g. avoid grapefruit"
-                value={form.instructions}
-                onChange={(e) => set('instructions', e.target.value)}
+          <section className="card" aria-labelledby="current-title">
+            <h2 id="current-title" className="section-title">
+              Current medicines
+            </h2>
+            {!canManage && shown.length > 0 && (
+              <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-4)' }}>
+                You can see these medicines. Only family members with order permission can change
+                them.
+              </p>
+            )}
+            {shown.length === 0 ? (
+              <EmptyState
+                icon={<Package size={28} aria-hidden="true" color="var(--primary)" />}
+                title="No medicines saved yet"
+                description={
+                  canManage
+                    ? 'Add a medicine so ElderCare can track doses and help with refills.'
+                    : undefined
+                }
+                action={
+                  canManage ? (
+                    <Button onClick={startAdd}>
+                      <Plus size={18} aria-hidden="true" /> Add a medicine
+                    </Button>
+                  ) : undefined
+                }
               />
-            </div>
+            ) : (
+              <div className="med-list">
+                {shown.map((m) => (
+                  <MedicineCard
+                    key={m._id}
+                    med={m}
+                    state={stateOf(m)}
+                    canManage={canManage}
+                    busy={taking === m._id}
+                    canUndo={undoable === m._id}
+                    onTake={() => void handleTake(m)}
+                    onUndo={() => void handleUndo(m)}
+                    onEdit={() => startEdit(m)}
+                    onStop={() => setStopping(m)}
+                  />
+                ))}
+              </div>
+            )}
+            <label className="checkbox-row" style={{ marginTop: 'var(--space-4)' }}>
+              <input
+                type="checkbox"
+                checked={showStopped}
+                onChange={(e) => setShowStopped(e.target.checked)}
+              />
+              <span>Also show stopped medicines</span>
+            </label>
+          </section>
 
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button type="submit" className="btn btn-primary" disabled={saving}>
-                {saving ? 'Saving…' : 'Save medicine'}
-              </button>
-              <button type="button" className="btn btn-secondary" onClick={() => setEditing(null)}>
-                Cancel
-              </button>
-            </div>
-          </form>
-        </div>
+          <section className="card" aria-labelledby="orders-title">
+            <h2 id="orders-title" className="section-title">
+              Medicine orders
+            </h2>
+            {orders.length === 0 ? (
+              <EmptyState
+                title="No orders yet"
+                description="Ask ElderCare to order a medicine and it will show up here."
+                action={
+                  <Link to="/assistant?ask=Order my usual medicine" className="btn btn-primary">
+                    Order medicine
+                  </Link>
+                }
+              />
+            ) : (
+              <>
+                <div className="med-list">
+                  {orders.map((o) => (
+                    <article key={o._id} className="med-card">
+                      <div className="med-card-head">
+                        <div>
+                          <h3 className="med-name">
+                            Order {o.orderNumber} · ₹{o.total}
+                          </h3>
+                          <p className="med-summary">
+                            {o.items.map((i) => `${i.brand} ${i.strength} × ${i.packs}`).join(', ')}
+                          </p>
+                          <p className="med-meta">
+                            Ordered by {o.orderedByName} on{' '}
+                            {new Date(o.createdAt).toLocaleDateString()} · Pay cash on delivery
+                          </p>
+                        </div>
+                        <StatusBadge status={ORDER_LABEL[o.status]?.status ?? 'neutral'}>
+                          {ORDER_LABEL[o.status]?.text ?? o.status}
+                        </StatusBadge>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                <p className="form-hint">
+                  This is the last status the pharmacy reported. Ask ElderCare to check an order for
+                  the latest update.
+                </p>
+              </>
+            )}
+          </section>
+        </>
       )}
 
-      <div className="card">
-        <h2 style={{ fontSize: '1.15rem', fontWeight: 600, marginBottom: '1rem' }}>
-          Pharmacy orders
-        </h2>
-        {orders.length === 0 ? (
-          <p style={{ color: 'var(--text-secondary)' }}>
-            No orders yet. Ask the assistant to order a medicine and it will show up here.
-          </p>
-        ) : (
-          <div style={{ display: 'grid', gap: '0.75rem' }}>
-            {orders.map((o) => (
-              <div
-                key={o._id}
-                style={{
-                  padding: '0.75rem 1rem',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: 'var(--radius-sm)',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: '1rem',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 600 }}>
-                    {o.orderNumber} · ₹{o.total}
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                    {o.items.map((i) => `${i.brand} ${i.strength} × ${i.packs}`).join(', ')}
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Ordered by {o.orderedByName} on {new Date(o.createdAt).toLocaleDateString()} ·
-                    Cash on delivery
-                  </div>
-                </div>
-                <span
-                  className={`badge ${o.status === 'delivered' ? 'badge-success' : 'badge-warning'}`}
-                >
-                  {STATUS_LABELS[o.status] ?? o.status}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <ConfirmDialog
+        open={!!stopping}
+        title={`Stop ${stopping?.name ?? 'this medicine'}?`}
+        confirmLabel="Yes, stop it"
+        destructive
+        busy={stopBusy}
+        onConfirm={() => void confirmStop()}
+        onCancel={() => setStopping(null)}
+      >
+        It will stay in the history, but ElderCare will no longer remind you about it or reorder it.
+        You can add it again later. This does not change what your doctor has prescribed.
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={!!pendingChanges}
+        title="Change how this medicine is taken?"
+        confirmLabel="Yes, save the changes"
+        busy={saving}
+        onConfirm={() => void save()}
+        onCancel={() => setPendingChanges(null)}
+      >
+        <p>Please check these changes match what the doctor or pharmacist told you:</p>
+        <ul style={{ margin: 'var(--space-3) 0 0 var(--space-6)' }}>
+          {pendingChanges?.map((c) => (
+            <li key={c}>{c}</li>
+          ))}
+        </ul>
+      </ConfirmDialog>
     </div>
   );
 };

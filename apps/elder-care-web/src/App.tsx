@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { AssistantSessionProvider } from './context/AssistantSessionContext';
 import { Navbar } from './components/Navbar';
 import { HealthCheck } from './components/HealthCheck';
 import { LoginPage } from './pages/LoginPage';
@@ -32,7 +33,7 @@ export const AppContent: React.FC = () => {
   return (
     <div className="app-container">
       <Navbar />
-      <main className="main-content">
+      <main className="main-content" id="main">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route
@@ -86,9 +87,11 @@ export const AppContent: React.FC = () => {
 export const App: React.FC = () => {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <AppContent />
-      </BrowserRouter>
+      <AssistantSessionProvider>
+        <BrowserRouter>
+          <AppContent />
+        </BrowserRouter>
+      </AssistantSessionProvider>
     </AuthProvider>
   );
 };

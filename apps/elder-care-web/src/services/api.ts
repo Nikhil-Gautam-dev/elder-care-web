@@ -4,6 +4,7 @@ import type {
   IDoseLog,
   IMedicationView,
   IPharmacyOrder,
+  RideStatus,
   LogDoseBody,
   UpdateMedicationBody,
   FamilyView,
@@ -193,5 +194,41 @@ export async function listDoses(id: string, limit = 5): Promise<IDoseLog[]> {
 export async function listPharmacyOrders(elderId?: string): Promise<IPharmacyOrder[]> {
   const params = elderId ? `?elderId=${encodeURIComponent(elderId)}` : '';
   const data = await request<{ items: IPharmacyOrder[] }>(`/pharmacy-orders${params}`);
+  return data.items;
+}
+
+/** ElderCare's record of a ride booked through the assistant (last known status). */
+export interface RideRecord {
+  _id: string;
+  rideNumber: string;
+  elderId: string;
+  pickup: string;
+  drop: string;
+  scheduledAt: string | null;
+  fareEstimate: number;
+  status: RideStatus;
+  driver?: { name: string; vehicle: string; plate: string };
+  rejectionReason?: string;
+  statusUpdatedAt: string;
+  createdAt: string;
+}
+
+export interface NotificationRecord {
+  _id: string;
+  senderName: string;
+  aboutUserId: string;
+  message: string;
+  read: boolean;
+  createdAt: string;
+}
+
+export async function listRides(elderId?: string): Promise<RideRecord[]> {
+  const params = elderId ? `?elderId=${encodeURIComponent(elderId)}` : '';
+  const data = await request<{ items: RideRecord[] }>(`/rides${params}`);
+  return data.items;
+}
+
+export async function listNotifications(): Promise<NotificationRecord[]> {
+  const data = await request<{ items: NotificationRecord[] }>('/notifications');
   return data.items;
 }

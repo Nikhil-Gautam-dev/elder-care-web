@@ -1,5 +1,11 @@
 import { type Collection, type ObjectId } from 'mongodb';
-import type { DaySlot, FoodTiming, MedicationForm, PharmacyOrderStatus } from '@eldercare/shared';
+import type {
+  DaySlot,
+  FoodTiming,
+  MedicationForm,
+  PharmacyOrderStatus,
+  RideStatus,
+} from '@eldercare/shared';
 import { getDb } from '../config/db.js';
 
 export const USERS_COLLECTION = 'users';
@@ -10,6 +16,9 @@ export const FAMILY_ALIASES_COLLECTION = 'family_aliases';
 export const MEDICATIONS_COLLECTION = 'medications';
 export const PHARMACY_ORDERS_COLLECTION = 'pharmacy_orders';
 export const DOSE_LOGS_COLLECTION = 'medication_dose_logs';
+// Owned by the MCP service; the API only reads them.
+export const RIDES_COLLECTION = 'rides';
+export const NOTIFICATIONS_COLLECTION = 'notifications';
 
 export interface UserDoc {
   _id: ObjectId;
@@ -167,6 +176,36 @@ export interface PharmacyOrderDoc {
   createdAt: Date;
 }
 
+/** Read-only view of the rides the assistant booked (written by the MCP service). */
+export interface RideDoc {
+  _id: ObjectId;
+  rideNumber: string;
+  elderId: ObjectId;
+  bookedByName: string;
+  pickup: string;
+  drop: string;
+  scheduledAt: Date | null;
+  notes?: string;
+  fareEstimate: number;
+  status: RideStatus;
+  driver?: { name: string; vehicle: string; plate: string };
+  rejectionReason?: string;
+  statusUpdatedAt: Date;
+  createdAt: Date;
+}
+
+/** Read-only view of family notifications (written by the MCP service). */
+export interface NotificationDoc {
+  _id: ObjectId;
+  recipientId: ObjectId;
+  senderId: ObjectId;
+  senderName: string;
+  aboutUserId: ObjectId;
+  message: string;
+  read: boolean;
+  createdAt: Date;
+}
+
 export function getUsersCollection(): Collection<UserDoc> {
   return getDb().collection<UserDoc>(USERS_COLLECTION);
 }
@@ -197,6 +236,14 @@ export function getDoseLogsCollection(): Collection<DoseLogDoc> {
 
 export function getPharmacyOrdersCollection(): Collection<PharmacyOrderDoc> {
   return getDb().collection<PharmacyOrderDoc>(PHARMACY_ORDERS_COLLECTION);
+}
+
+export function getRidesCollection(): Collection<RideDoc> {
+  return getDb().collection<RideDoc>(RIDES_COLLECTION);
+}
+
+export function getNotificationsCollection(): Collection<NotificationDoc> {
+  return getDb().collection<NotificationDoc>(NOTIFICATIONS_COLLECTION);
 }
 
 export async function ensureIndexes(): Promise<void> {

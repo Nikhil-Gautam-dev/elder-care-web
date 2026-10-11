@@ -1,77 +1,95 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { HeartHandshake, MessageSquare, Users, User, LogOut, Type, Pill } from 'lucide-react';
+import { HeartHandshake, Home, Mic, Users, User, LogOut, Type, Pill } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { ConfirmDialog } from './ui';
+
+const NAV = [
+  { to: '/', label: 'Home', Icon: Home, end: true },
+  { to: '/assistant', label: 'Talk to ElderCare', short: 'Talk', Icon: Mic },
+  { to: '/medications', label: 'Medicines', Icon: Pill },
+  { to: '/family', label: 'Family', Icon: Users },
+  { to: '/profile', label: 'My profile', short: 'Profile', Icon: User },
+] as const;
 
 export const Navbar: React.FC = () => {
-  const { isAuthenticated, user, logout, largeTextMode, toggleLargeTextMode } = useAuth();
+  const { isAuthenticated, logout, largeTextMode, toggleLargeTextMode } = useAuth();
   const navigate = useNavigate();
+  const [confirmLogout, setConfirmLogout] = useState(false);
 
   const handleLogout = () => {
+    setConfirmLogout(false);
     logout();
     navigate('/login');
   };
 
   return (
-    <header className="navbar">
-      <div className="brand">
-        <div className="brand-icon">
-          <HeartHandshake size={20} />
+    <>
+      <a href="#main" className="skip-link">
+        Skip to main content
+      </a>
+      <header className="navbar">
+        <div className="brand">
+          <div className="brand-icon" aria-hidden="true">
+            <HeartHandshake size={20} />
+          </div>
+          <span>ElderCare</span>
         </div>
-        <span>ElderCare</span>
-      </div>
-
-      <nav className="nav-links">
-        <button
-          onClick={toggleLargeTextMode}
-          className={`nav-item ${largeTextMode ? 'active' : ''}`}
-          title="Toggle Large Text Mode for better readability"
-          type="button"
-        >
-          <Type size={18} />
-          <span>{largeTextMode ? 'Standard Text' : 'Large Text'}</span>
-        </button>
 
         {isAuthenticated && (
-          <>
-            <NavLink to="/" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-              <span>Dashboard</span>
-            </NavLink>
-            <NavLink
-              to="/assistant"
-              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-            >
-              <MessageSquare size={18} />
-              <span>Care Assistant</span>
-            </NavLink>
-            <NavLink
-              to="/medications"
-              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-            >
-              <Pill size={18} />
-              <span>Medicines</span>
-            </NavLink>
-            <NavLink
-              to="/family"
-              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-            >
-              <Users size={18} />
-              <span>Family</span>
-            </NavLink>
-            <NavLink
-              to="/profile"
-              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-            >
-              <User size={18} />
-              <span>{user?.name || 'Profile'}</span>
-            </NavLink>
-            <button onClick={handleLogout} className="nav-item" type="button">
-              <LogOut size={18} />
-              <span>Logout</span>
-            </button>
-          </>
+          <nav className="nav-links" aria-label="Main">
+            {NAV.map(({ to, label, Icon, ...rest }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={'end' in rest}
+                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+              >
+                <Icon size={20} aria-hidden="true" />
+                <span>{'short' in rest ? rest.short : label}</span>
+              </NavLink>
+            ))}
+          </nav>
         )}
-      </nav>
-    </header>
+
+        <div className="nav-tools">
+          <button
+            onClick={toggleLargeTextMode}
+            className="nav-tool"
+            aria-pressed={largeTextMode}
+            aria-label={
+              largeTextMode
+                ? 'Text size: large. Switch to standard'
+                : 'Text size: standard. Switch to large'
+            }
+            type="button"
+          >
+            <Type size={18} aria-hidden="true" />
+            <span>{largeTextMode ? 'Larger text: on' : 'Larger text'}</span>
+          </button>
+          {isAuthenticated && (
+            <button
+              onClick={() => setConfirmLogout(true)}
+              className="nav-tool quiet"
+              aria-label="Log out"
+              type="button"
+            >
+              <LogOut size={18} aria-hidden="true" />
+              <span>Log out</span>
+            </button>
+          )}
+        </div>
+      </header>
+
+      <ConfirmDialog
+        open={confirmLogout}
+        title="Log out of ElderCare?"
+        confirmLabel="Log out"
+        onConfirm={handleLogout}
+        onCancel={() => setConfirmLogout(false)}
+      >
+        You will need your phone number and a code to log back in.
+      </ConfirmDialog>
+    </>
   );
 };

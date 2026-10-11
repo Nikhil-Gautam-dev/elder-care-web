@@ -1,446 +1,493 @@
-import React, { useState } from 'react';
-import { User, Type, Volume2, Save, CheckCircle } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   PIN_DIGITS,
+  deliveryAddressGaps,
+  formatIndianPhone,
   isValidPinCode,
+  type FamilyView,
   type Gender,
   type NotificationChannel,
   type RidePreference,
 } from '@eldercare/shared';
-import { formatIndianPhone } from '@eldercare/shared';
 import { useAuth } from '../context/AuthContext';
-import { updateUserProfile } from '../services/api';
+import { getMyFamily, updateUserProfile } from '../services/api';
+import { useUnsavedChangesWarning } from '../hooks/useUnsavedChangesWarning';
+import { Button, ConfirmDialog, FormField, Notice, PageHeader } from '../components/ui';
+
+const SPEECH_LANG_KEY = 'eldercare_speech_lang';
+
+interface ProfileForm {
+  name: string;
+  age: string;
+  gender: Gender | '';
+  email: string;
+  line1: string;
+  line2: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  language: string;
+  preferredRide: RidePreference;
+  voiceEnabled: boolean;
+  notificationChannel: NotificationChannel;
+}
+
+type Errors = Partial<Record<'name' | 'age' | 'email' | 'postalCode', string>>;
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const ProfilePage: React.FC = () => {
   const { user, userId, refreshUser, largeTextMode, toggleLargeTextMode } = useAuth();
 
-  const [name, setName] = useState<string>(user?.name || '');
-  const [age, setAge] = useState<number | undefined>(user?.age);
-  const [gender, setGender] = useState<Gender | ''>(user?.gender ?? '');
-  const [email, setEmail] = useState<string>(user?.email || '');
-  const [line1, setLine1] = useState<string>(user?.address?.line1 || '');
-  const [line2, setLine2] = useState<string>(user?.address?.line2 || '');
-  const [city, setCity] = useState<string>(user?.address?.city || '');
-  const [state, setState] = useState<string>(user?.address?.state || '');
-  const [postalCode, setPostalCode] = useState<string>(user?.address?.postalCode || '');
-
-  const [language, setLanguage] = useState<string>(user?.preferences?.language || 'en');
-  const [notificationChannel, setNotificationChannel] = useState<NotificationChannel>(
-    user?.preferences?.notificationChannel || 'sms',
-  );
-  const [preferredRide, setPreferredRide] = useState<RidePreference>(
-    user?.preferences?.preferredRide || 'accessible',
-  );
-
-  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(
-    user?.accessibility?.voiceEnabled ?? false,
+  const initial = useMemo<ProfileForm>(
+    () => ({
+      name: user?.name ?? '',
+      age: user?.age ? String(user.age) : '',
+      gender: user?.gender ?? '',
+      email: user?.email ?? '',
+      line1: user?.address?.line1 ?? '',
+      line2: user?.address?.line2 ?? '',
+      city: user?.address?.city ?? '',
+      state: user?.address?.state ?? '',
+      postalCode: user?.address?.postalCode ?? '',
+      language: user?.preferences?.language ?? 'en',
+      preferredRide: user?.preferences?.preferredRide ?? 'accessible',
+      voiceEnabled: user?.accessibility?.voiceEnabled ?? false,
+      notificationChannel: user?.preferences?.notificationChannel ?? 'sms',
+    }),
+    // Re-baselined after a successful save (user refreshes), not on every keystroke.
+    [user],
   );
 
-  const [loading, setLoading] = useState<boolean>(false);
-  const [success, setSuccess] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState<ProfileForm>(initial);
+  const [errors, setErrors] = useState<Errors>({});
+  const [submitCount, setSubmitCount] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
+  const [family, setFamily] = useState<FamilyView | null>(null);
+
+  const dirty = (Object.keys(initial) as (keyof ProfileForm)[]).some((k) => form[k] !== initial[k]);
+  const { leaving, leave, stay } = useUnsavedChangesWarning(dirty);
+
+  useEffect(() => {
+    getMyFamily()
+      .then(setFamily)
+      .catch(() => setFamily(null));
+  }, []);
+
+  // Move focus to the first field with a problem after a failed save attempt.
+  useEffect(() => {
+    if (submitCount === 0) return;
+    document.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+  }, [submitCount]);
+
+  const set = <K extends keyof ProfileForm>(key: K, value: ProfileForm[K]) => {
+    setForm((f) => ({ ...f, [key]: value }));
+    setJustSaved(false);
+    if (key in errors) setErrors((e) => ({ ...e, [key]: undefined }));
+  };
+
+  const validate = (): Errors => {
+    const e: Errors = {};
+    if (!form.name.trim()) e.name = 'Please enter your name.';
+    if (form.age.trim()) {
+      const n = Number(form.age);
+      if (!Number.isInteger(n) || n < 1 || n > 120)
+        e.age = 'Please enter an age between 1 and 120.';
+    }
+    if (form.email.trim() && !EMAIL.test(form.email.trim()))
+      e.email = 'This email address doesn’t look right. It should look like name@example.com.';
+    if (form.postalCode.trim() && !isValidPinCode(form.postalCode))
+      e.postalCode = `A PIN code has exactly ${PIN_DIGITS} digits.`;
+    return e;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userId) return;
-    setError(null);
-    setSuccess(false);
-    if (postalCode && !isValidPinCode(postalCode)) {
-      setError(`PIN code must be exactly ${PIN_DIGITS} digits`);
+    setSaveError(null);
+    setJustSaved(false);
+
+    const found = validate();
+    setErrors(found);
+    if (Object.keys(found).length > 0) {
+      setSubmitCount((c) => c + 1);
       return;
     }
-    setLoading(true);
+
+    setSaving(true);
     try {
       await updateUserProfile(userId, {
-        name,
-        age: age ? Number(age) : undefined,
-        gender: gender || undefined,
-        email: email || undefined,
+        name: form.name.trim(),
+        age: form.age.trim() ? Number(form.age) : undefined,
+        gender: form.gender || undefined,
+        email: form.email.trim() || undefined,
         address: {
           ...user?.address,
-          line1: line1.trim(),
-          line2: line2.trim(),
-          city: city.trim(),
-          state: state.trim(),
-          postalCode: postalCode.trim(),
+          line1: form.line1.trim(),
+          line2: form.line2.trim(),
+          city: form.city.trim(),
+          state: form.state.trim(),
+          postalCode: form.postalCode.trim(),
         },
         preferences: {
           ...user?.preferences,
-          language,
-          notificationChannel,
-          preferredRide,
+          language: form.language,
+          notificationChannel: form.notificationChannel,
+          preferredRide: form.preferredRide,
         },
-        accessibility: {
-          largeText: largeTextMode,
-          voiceEnabled,
-        },
+        accessibility: { largeText: largeTextMode, voiceEnabled: form.voiceEnabled },
       });
+      // A new profile language should also drive the assistant's microphone and voice.
+      if (
+        form.language !== initial.language &&
+        (form.language === 'en' || form.language === 'hi')
+      ) {
+        try {
+          localStorage.setItem(SPEECH_LANG_KEY, form.language);
+        } catch {
+          // Not critical: the assistant falls back to the profile language.
+        }
+      }
       await refreshUser();
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to update profile');
+      setJustSaved(true);
+    } catch (err) {
+      // Everything typed stays in place so it can be fixed and saved again.
+      setSaveError((err as Error).message || 'We couldn’t save your changes.');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
+  const discard = () => {
+    setForm(initial);
+    setErrors({});
+    setSaveError(null);
+  };
+
+  const addressGaps = deliveryAddressGaps({ line1: form.line1, city: form.city });
+  const others = family?.members.filter((m) => !m.isMe) ?? [];
+
   return (
-    <div style={{ maxWidth: '700px', margin: '0 auto' }}>
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 700 }}>Profile & Care Preferences</h1>
-        <p style={{ color: 'var(--text-secondary)' }}>
-          Manage your personal information, notification channels, and accessibility options.
-        </p>
-      </div>
+    <div style={{ maxWidth: '720px', margin: '0 auto' }}>
+      <PageHeader
+        title="My profile"
+        subtitle="Your details, where medicine is delivered, and how ElderCare helps you."
+      />
 
-      {success && (
-        <div
-          style={{
-            background: 'var(--success-light)',
-            color: 'var(--success)',
-            padding: '0.75rem 1rem',
-            borderRadius: 'var(--radius-sm)',
-            marginBottom: '1.5rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-          }}
-        >
-          <CheckCircle size={18} />
-          <span>Profile updated successfully!</span>
-        </div>
-      )}
-
-      {error && (
-        <div
-          style={{
-            background: 'var(--danger-light)',
-            color: 'var(--danger)',
-            padding: '0.75rem 1rem',
-            borderRadius: 'var(--radius-sm)',
-            marginBottom: '1.5rem',
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit}>
-        <div className="card">
-          <h2
-            style={{
-              fontSize: '1.15rem',
-              fontWeight: 600,
-              marginBottom: '1rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-            }}
-          >
-            <User size={20} style={{ color: 'var(--primary)' }} />
-            <span>Personal Information</span>
+      <form onSubmit={handleSubmit} noValidate>
+        <section className="card" aria-labelledby="personal-title">
+          <h2 id="personal-title" className="section-title">
+            Personal details
           </h2>
 
-          <div className="form-group">
-            <label className="form-label" htmlFor="phone-display">
-              Phone Number (Account Identity)
-            </label>
-            <input
-              id="phone-display"
-              type="text"
-              className="input-field"
-              value={formatIndianPhone(user?.phone)}
-              disabled
-              style={{ background: 'var(--bg-color)' }}
-            />
-          </div>
-
-          <div className="grid-2">
-            <div className="form-group">
-              <label className="form-label" htmlFor="name-input">
-                Full Name
-              </label>
-              <input
-                id="name-input"
-                type="text"
-                className="input-field"
-                placeholder="e.g. John Doe"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="age-input">
-                Age
-              </label>
-              <input
-                id="age-input"
-                type="number"
-                className="input-field"
-                placeholder="e.g. 72"
-                value={age || ''}
-                onChange={(e) => setAge(e.target.value ? Number(e.target.value) : undefined)}
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="gender-select">
-                Gender (Optional)
-              </label>
-              <select
-                id="gender-select"
-                className="input-field"
-                value={gender}
-                onChange={(e) => setGender(e.target.value as Gender | '')}
-              >
-                <option value="">Prefer not to say</option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="email-input">
-              Email Address (Optional)
-            </label>
-            <input
-              id="email-input"
-              type="email"
-              className="input-field"
-              placeholder="e.g. john@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
-
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: '1rem 0 0.5rem' }}>
-            Home address (used for medicine delivery)
-          </h3>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="line1-input">
-              House number and street
-            </label>
-            <input
-              id="line1-input"
-              type="text"
-              className="input-field"
-              placeholder="e.g. House No 23, Ambika City"
-              value={line1}
-              onChange={(e) => setLine1(e.target.value)}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="line2-input">
-              Area / landmark (optional)
-            </label>
-            <input
-              id="line2-input"
-              type="text"
-              className="input-field"
-              placeholder="e.g. Near the park"
-              value={line2}
-              onChange={(e) => setLine2(e.target.value)}
-            />
-          </div>
-
-          <div className="grid-2">
-            <div className="form-group">
-              <label className="form-label" htmlFor="city-input">
-                City
-              </label>
-              <input
-                id="city-input"
-                type="text"
-                className="input-field"
-                placeholder="e.g. Chandigarh"
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="state-input">
-                State
-              </label>
-              <input
-                id="state-input"
-                type="text"
-                className="input-field"
-                placeholder="e.g. Punjab"
-                value={state}
-                onChange={(e) => setState(e.target.value)}
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="pin-input">
-                PIN code
-              </label>
-              <input
-                id="pin-input"
-                type="text"
-                inputMode="numeric"
-                className="input-field"
-                placeholder="e.g. 160001"
-                maxLength={PIN_DIGITS}
-                value={postalCode}
-                onChange={(e) =>
-                  setPostalCode(e.target.value.replace(/\D/g, '').slice(0, PIN_DIGITS))
-                }
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="card">
-          <h2
-            style={{
-              fontSize: '1.15rem',
-              fontWeight: 600,
-              marginBottom: '1rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-            }}
+          <FormField
+            label="Phone number"
+            hint="This is how you log in, so it can’t be changed here."
           >
-            <Type size={20} style={{ color: 'var(--primary)' }} />
-            <span>Accessibility & Readability</span>
-          </h2>
+            {(a) => (
+              <input
+                {...a}
+                type="text"
+                className="input-field"
+                value={formatIndianPhone(user?.phone)}
+                readOnly
+                style={{ background: 'var(--bg-color)' }}
+              />
+            )}
+          </FormField>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '1rem',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--bg-color)',
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 600 }}>Large Text Display Mode</div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                  Increases interface font size and spacing for easier reading.
-                </div>
-              </div>
-              <button
-                type="button"
-                className={`btn ${largeTextMode ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={toggleLargeTextMode}
-              >
-                {largeTextMode ? 'Enabled' : 'Disabled'}
-              </button>
-            </div>
-
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '1rem',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--bg-color)',
-              }}
-            >
-              <div>
-                <div
-                  style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+          <div className="grid-2">
+            <FormField label="Full name" error={errors.name}>
+              {(a) => (
+                <input
+                  {...a}
+                  type="text"
+                  className="input-field"
+                  autoComplete="name"
+                  value={form.name}
+                  onChange={(e) => set('name', e.target.value)}
+                />
+              )}
+            </FormField>
+            <FormField label="Age" optional error={errors.age}>
+              {(a) => (
+                <input
+                  {...a}
+                  type="number"
+                  inputMode="numeric"
+                  className="input-field"
+                  value={form.age}
+                  onChange={(e) => set('age', e.target.value)}
+                />
+              )}
+            </FormField>
+            <FormField label="Gender" optional>
+              {(a) => (
+                <select
+                  {...a}
+                  className="input-field"
+                  value={form.gender}
+                  onChange={(e) => set('gender', e.target.value as Gender | '')}
                 >
-                  <Volume2 size={18} />
-                  <span>Voice Assistance Prompts</span>
-                </div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                  Enable audio feedback and speech input shortcuts.
-                </div>
-              </div>
-              <button
-                type="button"
-                className={`btn ${voiceEnabled ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setVoiceEnabled(!voiceEnabled)}
-              >
-                {voiceEnabled ? 'Enabled' : 'Disabled'}
-              </button>
-            </div>
+                  <option value="">Prefer not to say</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              )}
+            </FormField>
+            <FormField label="Email address" optional error={errors.email}>
+              {(a) => (
+                <input
+                  {...a}
+                  type="email"
+                  className="input-field"
+                  autoComplete="email"
+                  value={form.email}
+                  onChange={(e) => set('email', e.target.value)}
+                />
+              )}
+            </FormField>
           </div>
-        </div>
+        </section>
 
-        <div className="card">
-          <h2 style={{ fontSize: '1.15rem', fontWeight: 600, marginBottom: '1rem' }}>
-            Preferences & Notifications
+        <section className="card" aria-labelledby="address-title">
+          <h2 id="address-title" className="section-title">
+            Delivery address
+          </h2>
+          <p className="section-intro">
+            Medicine is delivered here, and rides start from here unless you say otherwise.
+          </p>
+          {addressGaps.length > 0 && (
+            <p className="form-hint" style={{ marginBottom: 'var(--space-4)' }} role="status">
+              To order medicine, we still need your {addressGaps.join(' and ')}.
+            </p>
+          )}
+
+          <FormField label="House number and street">
+            {(a) => (
+              <input
+                {...a}
+                type="text"
+                className="input-field"
+                autoComplete="address-line1"
+                placeholder="e.g. House 23, Ambika City"
+                value={form.line1}
+                onChange={(e) => set('line1', e.target.value)}
+              />
+            )}
+          </FormField>
+          <FormField label="Area or landmark" optional>
+            {(a) => (
+              <input
+                {...a}
+                type="text"
+                className="input-field"
+                autoComplete="address-line2"
+                placeholder="e.g. Near the park"
+                value={form.line2}
+                onChange={(e) => set('line2', e.target.value)}
+              />
+            )}
+          </FormField>
+          <div className="grid-2">
+            <FormField label="City">
+              {(a) => (
+                <input
+                  {...a}
+                  type="text"
+                  className="input-field"
+                  autoComplete="address-level2"
+                  value={form.city}
+                  onChange={(e) => set('city', e.target.value)}
+                />
+              )}
+            </FormField>
+            <FormField label="State" optional>
+              {(a) => (
+                <input
+                  {...a}
+                  type="text"
+                  className="input-field"
+                  autoComplete="address-level1"
+                  value={form.state}
+                  onChange={(e) => set('state', e.target.value)}
+                />
+              )}
+            </FormField>
+            <FormField label="PIN code" optional error={errors.postalCode}>
+              {(a) => (
+                <input
+                  {...a}
+                  type="text"
+                  inputMode="numeric"
+                  className="input-field"
+                  autoComplete="postal-code"
+                  maxLength={PIN_DIGITS}
+                  value={form.postalCode}
+                  onChange={(e) =>
+                    set('postalCode', e.target.value.replace(/\D/g, '').slice(0, PIN_DIGITS))
+                  }
+                />
+              )}
+            </FormField>
+          </div>
+        </section>
+
+        <section className="card" aria-labelledby="help-title">
+          <h2 id="help-title" className="section-title">
+            How ElderCare helps me
           </h2>
 
-          <div className="grid-2">
-            <div className="form-group">
-              <label className="form-label" htmlFor="lang-select">
-                Preferred Language
-              </label>
-              <select
-                id="lang-select"
-                className="input-field"
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-              >
-                <option value="en">English</option>
-                <option value="es">Spanish</option>
-                <option value="hi">Hindi</option>
-              </select>
+          <div className="setting-row">
+            <div>
+              <strong id="text-size-label">Larger text</strong>
+              <p className="med-meta">Makes everything bigger. This changes right away.</p>
             </div>
+            <Button
+              variant={largeTextMode ? 'primary' : 'secondary'}
+              aria-pressed={largeTextMode}
+              aria-labelledby="text-size-label"
+              onClick={() => void toggleLargeTextMode()}
+            >
+              {largeTextMode ? 'On' : 'Off'}
+            </Button>
+          </div>
 
-            <div className="form-group">
-              <label className="form-label" htmlFor="channel-select">
-                Preferred Notification Channel
-              </label>
+          <div className="setting-row">
+            <div>
+              <strong id="voice-label">Spoken replies</strong>
+              <p className="med-meta">ElderCare reads its answers out loud.</p>
+            </div>
+            <Button
+              variant={form.voiceEnabled ? 'primary' : 'secondary'}
+              aria-pressed={form.voiceEnabled}
+              aria-labelledby="voice-label"
+              onClick={() => set('voiceEnabled', !form.voiceEnabled)}
+            >
+              {form.voiceEnabled ? 'On' : 'Off'}
+            </Button>
+          </div>
+
+          <div className="grid-2">
+            <FormField label="Language" hint="Used for listening and speaking.">
+              {(a) => (
+                <select
+                  {...a}
+                  className="input-field"
+                  value={form.language}
+                  onChange={(e) => set('language', e.target.value)}
+                >
+                  <option value="en">English</option>
+                  <option value="hi">हिन्दी (Hindi)</option>
+                  {form.language === 'es' && <option value="es">Spanish (text only)</option>}
+                </select>
+              )}
+            </FormField>
+            <FormField label="Ride type" hint="Used when ElderCare books a ride for you.">
+              {(a) => (
+                <select
+                  {...a}
+                  className="input-field"
+                  value={form.preferredRide}
+                  onChange={(e) => set('preferredRide', e.target.value as RidePreference)}
+                >
+                  <option value="accessible">Accessible (wheelchair or extra help)</option>
+                  <option value="standard">Standard</option>
+                  <option value="premium">Premium comfort</option>
+                </select>
+              )}
+            </FormField>
+          </div>
+        </section>
+
+        <section className="card" aria-labelledby="family-title">
+          <h2 id="family-title" className="section-title">
+            Family and notifications
+          </h2>
+
+          <p>
+            <strong>People you trust</strong>
+          </p>
+          {others.length > 0 ? (
+            <ul className="contact-list">
+              {others.map((m) => (
+                <li key={m.userId} className="badge badge-neutral">
+                  {m.name}
+                  {m.relationship ? ` (${m.relationship})` : ''}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="med-meta" style={{ margin: 'var(--space-2) 0 var(--space-4)' }}>
+              No one is connected yet.
+            </p>
+          )}
+          <p style={{ marginBottom: 'var(--space-6)' }}>
+            <Link to="/family" style={{ color: 'var(--primary-hover)', fontWeight: 600 }}>
+              Manage family and who gets updates
+            </Link>
+          </p>
+
+          <FormField
+            label="How should we contact you?"
+            hint="For now, family updates appear inside ElderCare. Your choice is saved for when other ways are added."
+          >
+            {(a) => (
               <select
-                id="channel-select"
+                {...a}
                 className="input-field"
-                value={notificationChannel}
-                onChange={(e) => setNotificationChannel(e.target.value as NotificationChannel)}
+                value={form.notificationChannel}
+                onChange={(e) => set('notificationChannel', e.target.value as NotificationChannel)}
               >
-                <option value="sms">SMS</option>
+                <option value="sms">Text message (SMS)</option>
                 <option value="whatsapp">WhatsApp</option>
-                <option value="app">App Notification</option>
+                <option value="app">Inside ElderCare</option>
                 <option value="email">Email</option>
               </select>
-            </div>
+            )}
+          </FormField>
+        </section>
 
-            <div className="form-group">
-              <label className="form-label" htmlFor="ride-select">
-                Preferred Ride Type
-              </label>
-              <select
-                id="ride-select"
-                className="input-field"
-                value={preferredRide}
-                onChange={(e) => setPreferredRide(e.target.value as RidePreference)}
-              >
-                <option value="accessible">Accessible (Wheelchair / Special Assistance)</option>
-                <option value="standard">Standard Ride</option>
-                <option value="premium">Premium Comfort Ride</option>
-              </select>
-            </div>
+        {saveError && <Notice kind="error">{saveError}</Notice>}
+
+        <div className={`save-bar ${dirty ? 'dirty' : ''}`}>
+          <span role="status" style={{ fontWeight: 600 }}>
+            {saving
+              ? 'Saving…'
+              : dirty
+                ? 'You have changes that are not saved yet.'
+                : justSaved
+                  ? 'Changes saved.'
+                  : 'Everything is up to date.'}
+          </span>
+          <div className="save-bar-actions">
+            {dirty && (
+              <Button variant="secondary" onClick={discard} disabled={saving}>
+                Undo changes
+              </Button>
+            )}
+            <Button type="submit" disabled={saving || !dirty}>
+              {saving ? 'Saving…' : 'Save changes'}
+            </Button>
           </div>
         </div>
-
-        <button
-          type="submit"
-          className="btn btn-primary btn-large"
-          style={{ width: '100%', marginBottom: '2rem' }}
-          disabled={loading}
-        >
-          <Save size={18} />
-          <span>{loading ? 'Saving Changes...' : 'Save Profile Settings'}</span>
-        </button>
       </form>
+
+      <ConfirmDialog
+        open={leaving}
+        title="Leave without saving?"
+        confirmLabel="Leave without saving"
+        cancelLabel="Stay and keep editing"
+        destructive
+        onConfirm={leave}
+        onCancel={stay}
+      >
+        You have changes that are not saved. If you leave now, they will be lost.
+      </ConfirmDialog>
     </div>
   );
 };
