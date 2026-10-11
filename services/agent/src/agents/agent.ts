@@ -33,7 +33,7 @@ function extractText(result: Awaited<ReturnType<ElderCareMcpClient['callTool']>>
 
 /**
  * The assistant loop. It only knows the provider-neutral LLM interface, so switching between
- * Groq and Gemini (LLM_PROVIDER) never touches this file.
+ * Groq and Gemini (LLM_PROVIDERS, with failover) never touches this file.
  */
 export class ElderCareAgent {
   private messages: LlmMessage[] = [];

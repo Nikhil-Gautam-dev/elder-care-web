@@ -78,7 +78,7 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     service: '@eldercare/agent',
-    llm: { provider: llm.name, model: llm.model },
+    llm: { order: config.llm.providers, providers: llm.status() },
     mcpConnected: mcpClient !== null,
     mcpServer: config.mcpServerUrl,
     sessions: sessions.size,
