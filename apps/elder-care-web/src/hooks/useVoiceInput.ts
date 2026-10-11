@@ -19,6 +19,28 @@ interface Options {
 
 const join = (a: string, b: string) => [a.trim(), b.trim()].filter(Boolean).join(' ');
 
+/**
+ * Builds the text of one recognition session from its result list.
+ * Desktop browsers give one entry per phrase, but Android Chrome/Brave give a new entry for every
+ * partial result, each already holding the whole phrase so far ("I", "I want", "I want to"...).
+ * Joining those naively repeats every word, so an entry that merely extends the previous one
+ * replaces it.
+ */
+export function assembleTranscript(results: ArrayLike<ArrayLike<{ transcript: string }>>): string {
+  const parts: string[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const text = (results[i]?.[0]?.transcript ?? '').trim();
+    if (!text) continue;
+    const prev = parts[parts.length - 1];
+    if (prev !== undefined && text.toLowerCase().startsWith(prev.toLowerCase())) {
+      parts[parts.length - 1] = text;
+    } else {
+      parts.push(text);
+    }
+  }
+  return parts.join(' ');
+}
+
 const Recognition: any =
   typeof window !== 'undefined'
     ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -68,11 +90,7 @@ export function useVoiceInput(options: Options) {
       recognition.lang = opts.current.lang;
 
       recognition.onresult = (event: any) => {
-        let text = '';
-        for (let i = 0; i < event.results.length; i++) {
-          text += event.results[i][0].transcript;
-        }
-        sessionRef.current = text;
+        sessionRef.current = assembleTranscript(event.results);
         opts.current.onText(fullText());
 
         clearTimer();
