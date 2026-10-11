@@ -1,21 +1,24 @@
 {
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://eldercare-570b.onrender.com/:path*" },
+    {
+      "source": "/api/:path*",
+      "destination": "https://api.nikhilgautam.me/elder-care-api/:path*"
+    },
     {
       "source": "/agent-api/:path*",
-      "destination": "https://elder-care-agent-8hst.onrender.com/:path*"
+      "destination": "https://api.nikhilgautam.me/elder-care-agent/:path*"
     },
     {
       "source": "/pharmacy-api/:path*",
-      "destination": "https://elder-care-pharmacy.onrender.com/:path*"
+      "destination": "https://api.nikhilgautam.me/elder-care-pharmacy/:path*"
     },
     {
       "source": "/rides-api/:path*",
-      "destination": "https://elder-care-rides.onrender.com/:path*"
+      "destination": "https://api.nikhilgautam.me/elder-care-rides/:path*"
     },
     {
       "source": "/mcp-api/:path*",
-      "destination": "https://elder-care-mcp.onrender.com/:path*"
+      "destination": "https://api.nikhilgautam.me/elder-care-mcp/:path*"
     },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
