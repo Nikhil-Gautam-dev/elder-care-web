@@ -9,6 +9,9 @@
   },
   "scripts": {
     "build": "pnpm -r run build",
+    "build:status": "node scripts/build.mjs status",
+    "build:clear": "node scripts/build.mjs clear",
+    "build:services": "node scripts/build.mjs services",
     "dev": "pnpm -r run dev",
     "lint": "pnpm -r run lint",
     "lint:fix": "pnpm -r run lint:fix",
