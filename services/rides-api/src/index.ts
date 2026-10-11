@@ -13,11 +13,7 @@ import routes from './routes/index.js';
 const app = express();
 
 app.use(cors());
-app.use(
-  morgan(':date[iso] :method :url :status :response-time ms - :res[content-length]', {
-    skip: (req) => req.path === '/health',
-  }),
-);
+app.use(morgan(':date[iso] :method :url :status :response-time ms - :res[content-length]', {}));
 app.use(express.json());
 
 app.get('/health', (_req, res) => {
