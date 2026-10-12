@@ -1,338 +1,440 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell, RefreshCw } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { ArrowRight, Bell, Car, MapPin, Phone, StickyNote } from 'lucide-react';
+import { cancelRide, setRideStatus, type Driver, type Ride, type RideStatus } from '../api';
 import {
-  ApiError,
-  cancelRide,
-  listDrivers,
-  listRides,
-  setRideStatus,
-  type Driver,
-  type Ride,
-  type RideStatus,
-} from '../api';
+  Avatar,
+  Badge,
+  Button,
+  ConfirmModal,
+  DataTable,
+  Drawer,
+  EmptyState,
+  Field,
+  ReasonModal,
+  SearchInput,
+  Steps,
+  Tabs,
+  useToast,
+  type Column,
+  type StepItem,
+} from '../components/ui';
+import {
+  ACTIONS,
+  ACTIVE,
+  FLOW,
+  ON_TRIP,
+  STATUS_LABEL,
+  STATUS_TONE,
+  whenLabel,
+  type Action,
+} from '../rideMeta';
+import { formatDateTime, formatPhone, inr, timeAgo } from '../utils';
 
-const POLL_MS = 5000;
-
-const FILTERS: { key: string; label: string; status?: string }[] = [
-  { key: 'active', label: 'Active', status: 'requested,accepted,arriving,in_progress' },
-  { key: 'new', label: 'New', status: 'requested' },
-  { key: 'completed', label: 'Completed', status: 'completed' },
-  { key: 'closed', label: 'Rejected / cancelled', status: 'rejected,cancelled' },
-  { key: 'all', label: 'All' },
+const TABS: { key: string; label: string; match: (r: Ride) => boolean }[] = [
+  { key: 'active', label: 'Active', match: (r) => ACTIVE.includes(r.status) },
+  { key: 'new', label: 'New', match: (r) => r.status === 'requested' },
+  { key: 'completed', label: 'Completed', match: (r) => r.status === 'completed' },
+  {
+    key: 'closed',
+    label: 'Rejected / cancelled',
+    match: (r) => r.status === 'rejected' || r.status === 'cancelled',
+  },
+  { key: 'all', label: 'All', match: () => true },
 ];
 
-const STATUS_LABEL: Record<RideStatus, string> = {
-  requested: 'New request',
-  accepted: 'Accepted',
-  arriving: 'Driver arriving',
-  in_progress: 'Ride in progress',
-  completed: 'Completed',
-  rejected: 'Rejected',
-  cancelled: 'Cancelled',
-};
+interface Props {
+  rides: Ride[] | null;
+  drivers: Driver[];
+  loading: boolean;
+  fresh: Set<string>;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  onChanged: () => Promise<void>;
+  onError: (err: unknown) => void;
+}
 
-const STATUS_CLASS: Record<RideStatus, string> = {
-  requested: 'warn',
-  accepted: '',
-  arriving: '',
-  in_progress: '',
-  completed: 'ok',
-  rejected: 'bad',
-  cancelled: 'bad',
-};
+export const RidesPage: React.FC<Props> = ({
+  rides,
+  drivers,
+  loading,
+  fresh,
+  selectedId,
+  onSelect,
+  onChanged,
+  onError,
+}) => {
+  const toast = useToast();
+  const [tab, setTab] = useState('active');
+  const [query, setQuery] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [rejecting, setRejecting] = useState<Ride | null>(null);
+  const [cancelling, setCancelling] = useState<Ride | null>(null);
 
-type Action = { status: RideStatus; label: string; kind: 'primary' | 'danger' };
+  const all = rides ?? [];
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const match = TABS.find((t) => t.key === tab)!.match;
+    return all.filter(
+      (r) =>
+        match(r) &&
+        (!q ||
+          r.rideNumber.toLowerCase().includes(q) ||
+          r.rider.name.toLowerCase().includes(q) ||
+          r.rider.phone.includes(q) ||
+          r.pickup.address.toLowerCase().includes(q) ||
+          r.drop.address.toLowerCase().includes(q) ||
+          (r.driver?.name.toLowerCase().includes(q) ?? false)),
+    );
+  }, [all, tab, query]);
 
-/** Only the valid next actions for each status (mirrors the API's transitions). */
-const ACTIONS: Record<RideStatus, Action[]> = {
-  requested: [
-    { status: 'accepted', label: 'Accept ride', kind: 'primary' },
-    { status: 'rejected', label: 'Reject', kind: 'danger' },
-  ],
-  accepted: [
-    { status: 'arriving', label: 'Mark arriving', kind: 'primary' },
-    { status: 'cancelled', label: 'Cancel ride', kind: 'danger' },
-  ],
-  arriving: [
-    { status: 'in_progress', label: 'Start ride', kind: 'primary' },
-    { status: 'cancelled', label: 'Cancel ride', kind: 'danger' },
-  ],
-  in_progress: [{ status: 'completed', label: 'Complete ride', kind: 'primary' }],
-  completed: [],
-  rejected: [],
-  cancelled: [],
-};
+  const selected = all.find((r) => r.id === selectedId) ?? null;
 
-const formatPhone = (phone: string) => phone.replace(/^\+91(\d{5})(\d{5})$/, '+91 $1 $2');
-
-export const RidesPage: React.FC<{ onUnauthorized: () => void }> = ({ onUnauthorized }) => {
-  const [filter, setFilter] = useState('active');
-  const [rides, setRides] = useState<Ride[]>([]);
-  const [drivers, setDrivers] = useState<Driver[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
-  const [choosing, setChoosing] = useState<string | null>(null);
-  const [driverId, setDriverId] = useState('');
-  const [open, setOpen] = useState<Set<string>>(new Set());
-  const seen = useRef<Set<string> | null>(null);
-  const [fresh, setFresh] = useState<Set<string>>(new Set());
-
-  const handleError = useCallback(
-    (err: unknown) => {
-      if (err instanceof ApiError && err.status === 401) onUnauthorized();
-      else setError(err instanceof Error ? err.message : 'Something went wrong');
-    },
-    [onUnauthorized],
-  );
-
-  const load = useCallback(async () => {
-    try {
-      const [{ items }, driverList] = await Promise.all([
-        listRides(FILTERS.find((f) => f.key === filter)?.status),
-        listDrivers(),
-      ]);
-      setRides(items);
-      setDrivers(driverList.items.filter((d) => d.active));
-      setUpdatedAt(new Date());
-      setError(null);
-
-      // Highlight rides that arrived since the last refresh (not on first load).
-      const ids = new Set(items.map((r) => r.id));
-      if (seen.current) {
-        const arrived = items.filter((r) => !seen.current!.has(r.id)).map((r) => r.id);
-        if (arrived.length) setFresh((prev) => new Set([...prev, ...arrived]));
-      }
-      seen.current = ids;
-    } catch (err) {
-      handleError(err);
-    }
-  }, [filter, handleError]);
-
-  useEffect(() => {
-    seen.current = null;
-    setFresh(new Set());
-    load();
-    const timer = setInterval(load, POLL_MS);
-    return () => clearInterval(timer);
-  }, [load]);
-
-  const run = async (ride: Ride, task: () => Promise<unknown>) => {
-    setBusy(ride.id);
+  const run = async (ride: Ride, task: () => Promise<unknown>, message: string) => {
+    setBusy(true);
     try {
       await task();
-      setChoosing(null);
-      await load();
+      await onChanged();
+      toast.show('success', `${ride.rideNumber} ${message}`);
     } catch (err) {
-      handleError(err);
+      onError(err);
     } finally {
-      setBusy(null);
+      setBusy(false);
+      setRejecting(null);
+      setCancelling(null);
     }
   };
 
-  const act = async (ride: Ride, action: Action) => {
-    if (action.status === 'accepted') {
-      setDriverId(drivers[0]?.id ?? '');
-      setChoosing(ride.id);
-      return;
-    }
-    if (action.status === 'rejected') {
-      const reason = window
-        .prompt('Reason for rejecting this ride (the rider will see it):')
-        ?.trim();
-      if (!reason) return;
-      await run(ride, () => setRideStatus(ride.id, 'rejected', { reason }));
-      return;
-    }
-    if (action.status === 'cancelled') {
-      if (!window.confirm(`Cancel ride ${ride.rideNumber}?`)) return;
-      await run(ride, () => cancelRide(ride.id));
-      return;
-    }
-    await run(ride, () => setRideStatus(ride.id, action.status));
+  const act = (ride: Ride, action: Action, driverId: string) => {
+    if (action.status === 'rejected') return setRejecting(ride);
+    if (action.status === 'cancelled') return setCancelling(ride);
+    const extra = action.status === 'accepted' ? { driverId } : {};
+    return run(
+      ride,
+      () => setRideStatus(ride.id, action.status, extra),
+      STATUS_LABEL[action.status].toLowerCase(),
+    );
   };
 
-  const toggle = (id: string) =>
-    setOpen((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const columns: Column<Ride>[] = [
+    {
+      key: 'ride',
+      header: 'Ride',
+      render: (r) => (
+        <div>
+          <div className="strong row" style={{ gap: 8 }}>
+            {r.rideNumber}
+            {fresh.has(r.id) && (
+              <Badge tone="warning" noDot>
+                <Bell size={11} /> New
+              </Badge>
+            )}
+          </div>
+          <div className="muted">{timeAgo(r.createdAt)}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'rider',
+      header: 'Rider',
+      render: (r) => (
+        <div className="row">
+          <Avatar name={r.rider.name} size="sm" />
+          <div>
+            <div className="strong">{r.rider.name}</div>
+            <div className="muted">{formatPhone(r.rider.phone)}</div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'route',
+      header: 'Route',
+      render: (r) => (
+        <div className="row" style={{ gap: 6 }}>
+          <span className="truncate" style={{ maxWidth: 120 }} title={r.pickup.address}>
+            {r.pickup.address}
+          </span>
+          <ArrowRight size={14} style={{ flex: 'none', color: 'var(--n-400)' }} />
+          <span className="truncate" style={{ maxWidth: 120 }} title={r.drop.address}>
+            {r.drop.address}
+          </span>
+        </div>
+      ),
+    },
+    { key: 'when', header: 'Pickup', render: (r) => whenLabel(r) },
+    {
+      key: 'fare',
+      header: 'Fare',
+      align: 'right',
+      render: (r) => <span className="strong">{inr(r.fareEstimate)}</span>,
+    },
+    {
+      key: 'driver',
+      header: 'Driver',
+      render: (r) =>
+        r.driver ? (
+          <div className="row">
+            <Avatar name={r.driver.name} size="sm" />
+            <span>{r.driver.name}</span>
+          </div>
+        ) : (
+          <span className="muted">Unassigned</span>
+        ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (r) => <Badge tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge>,
+    },
+  ];
 
   return (
-    <div>
-      <div className="order-head" style={{ marginBottom: '1rem', alignItems: 'center' }}>
-        <h1 style={{ fontSize: '1.4rem' }}>Rides</h1>
-        <span className="muted" style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-          <RefreshCw size={14} />
-          {updatedAt ? `Live — updated ${updatedAt.toLocaleTimeString()}` : 'Loading…'}
+    <>
+      <div className="page-head">
+        <div>
+          <h1>Rides</h1>
+          <p>Ride requests from families. New requests appear automatically.</p>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="toolbar">
+          <Tabs
+            active={tab}
+            onChange={setTab}
+            items={TABS.map((t) => ({
+              key: t.key,
+              label: t.label,
+              count: all.filter(t.match).length,
+            }))}
+          />
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder="Search ride, rider, place, driver"
+          />
+        </div>
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(r) => r.id}
+          loading={loading}
+          selectedKey={selectedId}
+          onRowClick={(r) => onSelect(r.id)}
+          rowClass={(r) => (fresh.has(r.id) ? 'flash' : '')}
+          empty={
+            <EmptyState
+              icon={<Car size={22} />}
+              title={query ? 'No matching rides' : 'No rides here right now'}
+              text={
+                query
+                  ? 'Try a different search.'
+                  : 'New requests will show up as soon as they are booked.'
+              }
+            />
+          }
+        />
+      </div>
+
+      {selected && (
+        <RideDrawer
+          key={selected.id}
+          ride={selected}
+          rides={all}
+          drivers={drivers}
+          busy={busy}
+          onClose={() => onSelect(null)}
+          onAct={act}
+        />
+      )}
+      {rejecting && (
+        <ReasonModal
+          title={`Reject ${rejecting.rideNumber}?`}
+          description="The rider will see this reason."
+          confirmLabel="Reject ride"
+          onClose={() => setRejecting(null)}
+          onConfirm={(reason) =>
+            run(rejecting, () => setRideStatus(rejecting.id, 'rejected', { reason }), 'rejected')
+          }
+        />
+      )}
+      {cancelling && (
+        <ConfirmModal
+          title={`Cancel ${cancelling.rideNumber}?`}
+          description="The rider and their family will be notified that this ride was cancelled."
+          confirmLabel="Cancel ride"
+          onClose={() => setCancelling(null)}
+          onConfirm={() => run(cancelling, () => cancelRide(cancelling.id), 'cancelled')}
+        />
+      )}
+    </>
+  );
+};
+
+const RideDrawer: React.FC<{
+  ride: Ride;
+  rides: Ride[];
+  drivers: Driver[];
+  busy: boolean;
+  onClose: () => void;
+  onAct: (ride: Ride, action: Action, driverId: string) => void;
+}> = ({ ride: r, rides, drivers, busy, onClose, onAct }) => {
+  const busyDrivers = new Set(
+    rides.filter((x) => ON_TRIP.includes(x.status) && x.driver).map((x) => x.driver!.id),
+  );
+  const [driverId, setDriverId] = useState(
+    (drivers.find((d) => !busyDrivers.has(d.id)) ?? drivers[0])?.id ?? '',
+  );
+  const actions = ACTIONS[r.status];
+  const failed = r.status === 'rejected' || r.status === 'cancelled';
+
+  const stamp = (status: RideStatus) => {
+    const h = [...r.statusHistory].reverse().find((e) => e.status === status);
+    return h ? { at: formatDateTime(h.at), note: h.note } : {};
+  };
+  const steps: StepItem[] = failed
+    ? r.statusHistory.map((h) => ({
+        label: STATUS_LABEL[h.status],
+        at: formatDateTime(h.at),
+        note: h.note ?? (h.status === r.status ? r.rejectionReason : undefined),
+      }))
+    : FLOW.map((s) => ({
+        label: s === 'requested' ? 'Ride requested' : STATUS_LABEL[s],
+        ...stamp(s),
+      }));
+  const current = failed ? Math.max(steps.length - 1, 0) : FLOW.indexOf(r.status);
+  const accepting = r.status === 'requested';
+
+  return (
+    <Drawer
+      title={r.rideNumber}
+      subtitle={`Requested ${formatDateTime(r.createdAt)}`}
+      onClose={onClose}
+      footer={
+        actions.length > 0 && (
+          <>
+            {actions
+              .filter((a) => a.kind === 'danger')
+              .map((a) => (
+                <Button
+                  key={a.status}
+                  variant="danger"
+                  disabled={busy}
+                  onClick={() => onAct(r, a, driverId)}
+                >
+                  {a.label}
+                </Button>
+              ))}
+            {actions
+              .filter((a) => a.kind === 'primary')
+              .map((a) => (
+                <Button
+                  key={a.status}
+                  disabled={busy || (a.status === 'accepted' && !driverId)}
+                  onClick={() => onAct(r, a, driverId)}
+                >
+                  {a.label}
+                </Button>
+              ))}
+          </>
+        )
+      }
+    >
+      <div className="row-between">
+        <Badge tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge>
+        <span className="strong" style={{ fontSize: '1.2rem' }}>
+          {inr(r.fareEstimate)}{' '}
+          <span className="muted" style={{ fontSize: '0.86rem', fontWeight: 400 }}>
+            est. fare
+          </span>
         </span>
       </div>
 
-      <div className="chips">
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            className={`chip ${filter === f.key ? 'active' : ''}`}
-            onClick={() => setFilter(f.key)}
+      {accepting && (
+        <section className="panel">
+          <Field
+            label="Assign driver"
+            htmlFor="driver"
+            hint={
+              drivers.length === 0 ? 'Add an active driver on the Drivers page first.' : undefined
+            }
           >
-            {f.label}
-          </button>
-        ))}
-      </div>
-
-      {error && <div className="error">{error}</div>}
-
-      {rides.length === 0 && !error && (
-        <div className="card muted">
-          No rides here right now. New requests appear automatically.
-        </div>
+            <select
+              id="driver"
+              className="select"
+              value={driverId}
+              onChange={(e) => setDriverId(e.target.value)}
+            >
+              {drivers.length === 0 && <option value="">No active drivers</option>}
+              {drivers.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} · {d.vehicle} ({d.plate}){busyDrivers.has(d.id) ? ' · on a ride' : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </section>
       )}
 
-      <div className="grid">
-        {rides.map((r) => (
-          <div key={r.id} className={`card ${r.status === 'requested' ? 'order-new' : ''}`}>
-            <div className="order-head">
-              <div>
-                <div
-                  style={{ fontWeight: 700, fontSize: '1.1rem', display: 'flex', gap: '0.5rem' }}
-                >
-                  {r.rideNumber}
-                  {fresh.has(r.id) && (
-                    <span className="badge warn">
-                      <Bell size={12} /> just arrived
-                    </span>
-                  )}
-                </div>
-                <div className="muted">Requested {new Date(r.createdAt).toLocaleString()}</div>
-              </div>
-              <span className={`badge ${STATUS_CLASS[r.status]}`}>{STATUS_LABEL[r.status]}</span>
+      <section>
+        <div className="section-title">Route</div>
+        <div className="panel stack" style={{ gap: 14 }}>
+          <div className="row" style={{ alignItems: 'flex-start' }}>
+            <MapPin size={16} style={{ marginTop: 3, color: 'var(--accent-600)', flex: 'none' }} />
+            <div>
+              <div className="muted">Pickup · {whenLabel(r)}</div>
+              <div className="strong">{r.pickup.address}</div>
             </div>
-
-            <div className="grid-2" style={{ marginTop: '0.75rem' }}>
-              <div className="route">
-                <div>
-                  <div className="label">Pickup</div>
-                  <div style={{ fontWeight: 600 }}>{r.pickup.address}</div>
-                </div>
-                <div>
-                  <div className="label">Drop</div>
-                  <div style={{ fontWeight: 600 }}>{r.drop.address}</div>
-                </div>
-              </div>
-              <div>
-                <div className="label">Rider</div>
-                <div style={{ fontWeight: 600 }}>{r.rider.name}</div>
-                <div>
-                  <a href={`tel:${r.rider.phone}`}>{formatPhone(r.rider.phone)}</a>
-                </div>
-                <div className="muted">
-                  {r.scheduledAt
-                    ? `Scheduled ${new Date(r.scheduledAt).toLocaleString()}`
-                    : 'As soon as possible'}
-                </div>
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                marginTop: '0.75rem',
-                gap: '1rem',
-              }}
-            >
-              <span style={{ fontWeight: 700 }}>Estimated fare ₹{r.fareEstimate}</span>
-              {r.driver && (
-                <span>
-                  {r.driver.name} · {r.driver.vehicle} · {r.driver.plate}
-                </span>
-              )}
-            </div>
-
-            {r.notes && (
-              <div style={{ marginTop: '0.5rem' }}>
-                <span className="label" style={{ display: 'inline' }}>
-                  Notes:{' '}
-                </span>
-                {r.notes}
-              </div>
-            )}
-            {r.rejectionReason && (
-              <div className="muted" style={{ marginTop: '0.5rem' }}>
-                Reason: {r.rejectionReason}
-              </div>
-            )}
-
-            {choosing === r.id ? (
-              <div className="ride-actions" style={{ alignItems: 'end' }}>
-                <div style={{ flex: '1 1 14rem' }}>
-                  <label className="label" htmlFor={`driver-${r.id}`}>
-                    Assign driver
-                  </label>
-                  <select
-                    id={`driver-${r.id}`}
-                    className="input"
-                    value={driverId}
-                    onChange={(e) => setDriverId(e.target.value)}
-                  >
-                    {drivers.length === 0 && <option value="">No active drivers</option>}
-                    {drivers.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name} — {d.vehicle} ({d.plate})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={!driverId || busy === r.id}
-                  onClick={() => run(r, () => setRideStatus(r.id, 'accepted', { driverId }))}
-                >
-                  Confirm
-                </button>
-                <button type="button" className="btn btn-ghost" onClick={() => setChoosing(null)}>
-                  Back
-                </button>
-              </div>
-            ) : (
-              <div className="ride-actions">
-                {ACTIONS[r.status].map((a) => (
-                  <button
-                    key={a.status}
-                    type="button"
-                    className={`btn btn-${a.kind}`}
-                    disabled={busy === r.id}
-                    onClick={() => act(r, a)}
-                  >
-                    {a.label}
-                  </button>
-                ))}
-                <button type="button" className="btn btn-ghost" onClick={() => toggle(r.id)}>
-                  {open.has(r.id) ? 'Hide history' : 'Status history'}
-                </button>
-              </div>
-            )}
-
-            {open.has(r.id) && (
-              <div className="history">
-                {r.statusHistory.map((h, i) => (
-                  <div key={i}>
-                    <strong>{STATUS_LABEL[h.status]}</strong>{' '}
-                    <span className="muted">
-                      {new Date(h.at).toLocaleString()}
-                      {h.note ? ` — ${h.note}` : ''}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
-        ))}
-      </div>
-    </div>
+          <div className="row" style={{ alignItems: 'flex-start' }}>
+            <MapPin size={16} style={{ marginTop: 3, color: 'var(--danger-dot)', flex: 'none' }} />
+            <div>
+              <div className="muted">Drop</div>
+              <div className="strong">{r.drop.address}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div className="section-title">Progress</div>
+        <Steps steps={steps} current={current} failed={failed} />
+      </section>
+
+      <section>
+        <div className="section-title">Rider</div>
+        <div className="panel stack" style={{ gap: 10 }}>
+          <div className="row">
+            <Avatar name={r.rider.name} />
+            <div className="strong">{r.rider.name}</div>
+          </div>
+          <div className="row muted">
+            <Phone size={15} />
+            <a href={`tel:${r.rider.phone}`}>{formatPhone(r.rider.phone)}</a>
+          </div>
+          {r.notes && (
+            <div className="row muted" style={{ alignItems: 'flex-start' }}>
+              <StickyNote size={15} style={{ marginTop: 3, flex: 'none' }} />
+              <span>{r.notes}</span>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {r.driver && (
+        <section>
+          <div className="section-title">Driver</div>
+          <div className="panel row">
+            <Avatar name={r.driver.name} />
+            <div>
+              <div className="strong">{r.driver.name}</div>
+              <div className="muted">
+                {r.driver.vehicle} · <span className="mono">{r.driver.plate}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+    </Drawer>
   );
 };

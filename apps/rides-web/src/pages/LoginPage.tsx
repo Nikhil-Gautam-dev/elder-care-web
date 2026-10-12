@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Car } from 'lucide-react';
+import { BellRing, Car, MapPinned, UserCheck } from 'lucide-react';
 import { login, setToken } from '../api';
+import { saveUser } from '../session';
+import { Button, Field } from '../components/ui';
 
 export const LoginPage: React.FC<{ onSignedIn: () => void }> = ({ onSignedIn }) => {
   const [username, setUsername] = useState('');
@@ -13,8 +15,9 @@ export const LoginPage: React.FC<{ onSignedIn: () => void }> = ({ onSignedIn }) 
     setError(null);
     setLoading(true);
     try {
-      const { token } = await login(username.trim(), password);
+      const { token, staff } = await login(username.trim(), password);
       setToken(token);
+      saveUser(staff?.name || username.trim());
       onSignedIn();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not sign in');
@@ -24,21 +27,50 @@ export const LoginPage: React.FC<{ onSignedIn: () => void }> = ({ onSignedIn }) 
   };
 
   return (
-    <div className="login">
-      <div className="card">
-        <div className="brand" style={{ marginBottom: '1.25rem' }}>
-          <Car size={26} />
-          <span>ElderCare Rides</span>
+    <div className="auth">
+      <section className="auth-brand">
+        <div className="row" style={{ gap: 12 }}>
+          <span className="sb-logo">
+            <Car size={20} />
+          </span>
+          <strong style={{ fontSize: '1.1rem' }}>ElderCare Rides</strong>
         </div>
-        <p className="muted" style={{ marginBottom: '1.25rem' }}>
-          Dispatcher sign in
-        </p>
-        {error && <div className="error">{error}</div>}
-        <form onSubmit={submit} className="grid">
-          <div>
-            <label className="label" htmlFor="username">
-              Username
-            </label>
+        <div>
+          <h2>Every ride, dispatched with care.</h2>
+          <p>
+            Receive medicine orders from families and care assistants, manage stock and deliver with
+            cash on delivery, all from one console.
+          </p>
+          <div className="auth-points">
+            <div>
+              <span className="ico">
+                <BellRing size={17} />
+              </span>
+              Live request feed with instant new-ride alerts
+            </div>
+            <div>
+              <span className="ico">
+                <UserCheck size={17} />
+              </span>
+              Assign a driver and accept in a single step
+            </div>
+            <div>
+              <span className="ico">
+                <MapPinned size={17} />
+              </span>
+              Clear pickup and drop details with fare estimates
+            </div>
+          </div>
+        </div>
+        <div className="sb-sub">© ElderCare Rides Partner Portal</div>
+      </section>
+
+      <section className="auth-form">
+        <form onSubmit={submit}>
+          <h1>Sign in</h1>
+          <p className="muted">Dispatcher access to the rides console.</p>
+          {error && <div className="notice">{error}</div>}
+          <Field label="Username" htmlFor="username">
             <input
               id="username"
               className="input"
@@ -48,11 +80,8 @@ export const LoginPage: React.FC<{ onSignedIn: () => void }> = ({ onSignedIn }) 
               onChange={(e) => setUsername(e.target.value)}
               required
             />
-          </div>
-          <div>
-            <label className="label" htmlFor="password">
-              Password
-            </label>
+          </Field>
+          <Field label="Password" htmlFor="password">
             <input
               id="password"
               type="password"
@@ -62,12 +91,12 @@ export const LoginPage: React.FC<{ onSignedIn: () => void }> = ({ onSignedIn }) 
               onChange={(e) => setPassword(e.target.value)}
               required
             />
-          </div>
-          <button type="submit" className="btn btn-primary" disabled={loading}>
+          </Field>
+          <Button type="submit" className="btn-block" disabled={loading}>
             {loading ? 'Signing in…' : 'Sign in'}
-          </button>
+          </Button>
         </form>
-      </div>
+      </section>
     </div>
   );
 };

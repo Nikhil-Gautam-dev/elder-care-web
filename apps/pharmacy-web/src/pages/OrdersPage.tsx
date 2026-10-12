@@ -1,235 +1,326 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell, RefreshCw } from 'lucide-react';
-import { ApiError, listOrders, setOrderStatus, type Order, type OrderStatus } from '../api';
+import React, { useMemo, useState } from 'react';
+import { Bell, ClipboardList, MapPin, Phone } from 'lucide-react';
+import { setOrderStatus, type Order, type OrderStatus } from '../api';
+import {
+  Avatar,
+  Badge,
+  Button,
+  DataTable,
+  Drawer,
+  EmptyState,
+  ReasonModal,
+  SearchInput,
+  Steps,
+  Tabs,
+  useToast,
+  type Column,
+  type StepItem,
+} from '../components/ui';
+import { ACTIVE, FLOW, NEXT, STATUS_LABEL, STATUS_TONE, formatAddress } from '../orderMeta';
+import { formatDateTime, formatPhone, inr, timeAgo } from '../utils';
 
-const POLL_MS = 5000;
-
-const FILTERS: { key: string; label: string; status?: string }[] = [
-  { key: 'active', label: 'Active', status: 'placed,accepted,packed,out_for_delivery' },
-  { key: 'new', label: 'New', status: 'placed' },
-  { key: 'delivered', label: 'Delivered', status: 'delivered' },
-  { key: 'closed', label: 'Rejected / cancelled', status: 'rejected,cancelled' },
-  { key: 'all', label: 'All' },
+const TABS: { key: string; label: string; match: (o: Order) => boolean }[] = [
+  { key: 'active', label: 'Active', match: (o) => ACTIVE.includes(o.status) },
+  { key: 'new', label: 'New', match: (o) => o.status === 'placed' },
+  { key: 'delivered', label: 'Delivered', match: (o) => o.status === 'delivered' },
+  {
+    key: 'closed',
+    label: 'Rejected / cancelled',
+    match: (o) => o.status === 'rejected' || o.status === 'cancelled',
+  },
+  { key: 'all', label: 'All', match: () => true },
 ];
 
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  placed: 'New order',
-  accepted: 'Accepted',
-  packed: 'Packed',
-  out_for_delivery: 'Out for delivery',
-  delivered: 'Delivered',
-  rejected: 'Rejected',
-  cancelled: 'Cancelled by customer',
-};
+interface Props {
+  orders: Order[] | null;
+  loading: boolean;
+  fresh: Set<string>;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  onChanged: () => Promise<void>;
+  onError: (err: unknown) => void;
+}
 
-const STATUS_CLASS: Record<OrderStatus, string> = {
-  placed: 'warn',
-  accepted: '',
-  packed: '',
-  out_for_delivery: '',
-  delivered: 'ok',
-  rejected: 'bad',
-  cancelled: 'bad',
-};
+export const OrdersPage: React.FC<Props> = ({
+  orders,
+  loading,
+  fresh,
+  selectedId,
+  onSelect,
+  onChanged,
+  onError,
+}) => {
+  const toast = useToast();
+  const [tab, setTab] = useState('active');
+  const [query, setQuery] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [rejecting, setRejecting] = useState<Order | null>(null);
 
-/** The one action that moves an order forward from each status. */
-const NEXT: Partial<Record<OrderStatus, { status: OrderStatus; label: string }>> = {
-  placed: { status: 'accepted', label: 'Accept order' },
-  accepted: { status: 'packed', label: 'Mark as packed' },
-  packed: { status: 'out_for_delivery', label: 'Out for delivery' },
-  out_for_delivery: { status: 'delivered', label: 'Mark delivered (cash collected)' },
-};
+  const all = orders ?? [];
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const match = TABS.find((t) => t.key === tab)!.match;
+    return all.filter(
+      (o) =>
+        match(o) &&
+        (!q ||
+          o.orderNumber.toLowerCase().includes(q) ||
+          o.customer.name.toLowerCase().includes(q) ||
+          o.customer.phone.includes(q) ||
+          o.items.some((i) => `${i.brand} ${i.generic}`.toLowerCase().includes(q))),
+    );
+  }, [all, tab, query]);
 
-const formatAddress = (a: Order['customer']['address']) =>
-  [a.line1, a.line2, a.city, a.state, a.postalCode].filter(Boolean).join(', ');
+  const selected = all.find((o) => o.id === selectedId) ?? null;
 
-export const OrdersPage: React.FC<{ onUnauthorized: () => void }> = ({ onUnauthorized }) => {
-  const [filter, setFilter] = useState('active');
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
-  const seen = useRef<Set<string> | null>(null);
-  const [fresh, setFresh] = useState<Set<string>>(new Set());
-
-  const handleError = useCallback(
-    (err: unknown) => {
-      if (err instanceof ApiError && err.status === 401) onUnauthorized();
-      else setError(err instanceof Error ? err.message : 'Something went wrong');
-    },
-    [onUnauthorized],
-  );
-
-  const load = useCallback(async () => {
-    try {
-      const { items } = await listOrders(FILTERS.find((f) => f.key === filter)?.status);
-      setOrders(items);
-      setUpdatedAt(new Date());
-      setError(null);
-
-      // Highlight orders that arrived since the last refresh (not on first load).
-      const ids = new Set(items.map((o) => o.id));
-      if (seen.current) {
-        const arrived = items.filter((o) => !seen.current!.has(o.id)).map((o) => o.id);
-        if (arrived.length) setFresh((prev) => new Set([...prev, ...arrived]));
-      }
-      seen.current = ids;
-    } catch (err) {
-      handleError(err);
-    }
-  }, [filter, handleError]);
-
-  useEffect(() => {
-    seen.current = null;
-    setFresh(new Set());
-    load();
-    const timer = setInterval(load, POLL_MS);
-    return () => clearInterval(timer);
-  }, [load]);
-
-  const move = async (order: Order, status: OrderStatus) => {
-    let reason: string | undefined;
-    if (status === 'rejected') {
-      reason = window.prompt('Reason for rejecting this order (the customer will see it):')?.trim();
-      if (!reason) return;
-    }
-    setBusy(order.id);
+  const move = async (order: Order, status: OrderStatus, reason?: string) => {
+    setBusy(true);
     try {
       await setOrderStatus(order.id, status, reason);
-      await load();
+      await onChanged();
+      toast.show('success', `${order.orderNumber} ${STATUS_LABEL[status].toLowerCase()}`);
     } catch (err) {
-      handleError(err);
+      onError(err);
     } finally {
-      setBusy(null);
+      setBusy(false);
+      setRejecting(null);
     }
   };
 
+  const columns: Column<Order>[] = [
+    {
+      key: 'order',
+      header: 'Order',
+      render: (o) => (
+        <div>
+          <div className="strong row" style={{ gap: 8 }}>
+            {o.orderNumber}
+            {fresh.has(o.id) && (
+              <Badge tone="warning" noDot>
+                <Bell size={11} /> New
+              </Badge>
+            )}
+          </div>
+          <div className="muted">{timeAgo(o.createdAt)}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'customer',
+      header: 'Customer',
+      render: (o) => (
+        <div className="row">
+          <Avatar name={o.customer.name} size="sm" />
+          <div>
+            <div className="strong">{o.customer.name}</div>
+            <div className="muted">{formatPhone(o.customer.phone)}</div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'items',
+      header: 'Items',
+      render: (o) => (
+        <div>
+          <div className="truncate" style={{ maxWidth: 240 }}>
+            {o.items.map((i) => i.brand).join(', ')}
+          </div>
+          <div className="muted">
+            {o.items.length} item{o.items.length === 1 ? '' : 's'}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'total',
+      header: 'Total (COD)',
+      align: 'right',
+      render: (o) => <span className="strong">{inr(o.total)}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (o) => <Badge tone={STATUS_TONE[o.status]}>{STATUS_LABEL[o.status]}</Badge>,
+    },
+  ];
+
   return (
-    <div>
-      <div className="order-head" style={{ marginBottom: '1rem', alignItems: 'center' }}>
-        <h1 style={{ fontSize: '1.4rem' }}>Orders</h1>
-        <span className="muted" style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-          <RefreshCw size={14} />
-          {updatedAt ? `Live — updated ${updatedAt.toLocaleTimeString()}` : 'Loading…'}
-        </span>
+    <>
+      <div className="page-head">
+        <div>
+          <h1>Orders</h1>
+          <p>Incoming prescriptions and deliveries. New orders appear automatically.</p>
+        </div>
       </div>
 
-      <div className="chips">
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            className={`chip ${filter === f.key ? 'active' : ''}`}
-            onClick={() => setFilter(f.key)}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="card">
+        <div className="toolbar">
+          <Tabs
+            active={tab}
+            onChange={setTab}
+            items={TABS.map((t) => ({
+              key: t.key,
+              label: t.label,
+              count: all.filter(t.match).length,
+            }))}
+          />
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder="Search order, customer, medicine"
+          />
+        </div>
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(o) => o.id}
+          loading={loading}
+          selectedKey={selectedId}
+          onRowClick={(o) => onSelect(o.id)}
+          rowClass={(o) => (fresh.has(o.id) ? 'flash' : '')}
+          empty={
+            <EmptyState
+              icon={<ClipboardList size={22} />}
+              title={query ? 'No matching orders' : 'No orders here right now'}
+              text={
+                query
+                  ? 'Try a different search.'
+                  : 'New orders will show up as soon as they are placed.'
+              }
+            />
+          }
+        />
       </div>
 
-      {error && <div className="error">{error}</div>}
-
-      {orders.length === 0 && !error && (
-        <div className="card muted">No orders here right now. New orders appear automatically.</div>
+      {selected && (
+        <OrderDrawer
+          order={selected}
+          busy={busy}
+          onClose={() => onSelect(null)}
+          onMove={(s) => move(selected, s)}
+          onReject={() => setRejecting(selected)}
+        />
       )}
+      {rejecting && (
+        <ReasonModal
+          title={`Reject ${rejecting.orderNumber}?`}
+          description="The customer will see this reason. Reserved stock is released."
+          confirmLabel="Reject order"
+          onClose={() => setRejecting(null)}
+          onConfirm={(reason) => move(rejecting, 'rejected', reason)}
+        />
+      )}
+    </>
+  );
+};
 
-      <div className="grid">
-        {orders.map((o) => {
-          const next = NEXT[o.status];
-          const canReject = o.status === 'placed' || o.status === 'accepted';
-          return (
-            <div key={o.id} className={`card ${o.status === 'placed' ? 'order-new' : ''}`}>
-              <div className="order-head">
-                <div>
-                  <div
-                    style={{ fontWeight: 700, fontSize: '1.05rem', display: 'flex', gap: '0.5rem' }}
-                  >
-                    {o.orderNumber}
-                    {fresh.has(o.id) && (
-                      <span className="badge warn">
-                        <Bell size={12} /> just arrived
-                      </span>
-                    )}
-                  </div>
-                  <div className="muted">{new Date(o.createdAt).toLocaleString()}</div>
-                </div>
-                <span className={`badge ${STATUS_CLASS[o.status]}`}>{STATUS_LABEL[o.status]}</span>
-              </div>
+const OrderDrawer: React.FC<{
+  order: Order;
+  busy: boolean;
+  onClose: () => void;
+  onMove: (s: OrderStatus) => void;
+  onReject: () => void;
+}> = ({ order: o, busy, onClose, onMove, onReject }) => {
+  const next = NEXT[o.status];
+  const canReject = o.status === 'placed' || o.status === 'accepted';
+  const failed = o.status === 'rejected' || o.status === 'cancelled';
 
-              <div className="grid-2" style={{ marginTop: '0.75rem' }}>
-                <div>
-                  <div className="label">Customer</div>
-                  <div style={{ fontWeight: 600 }}>{o.customer.name}</div>
-                  <div>{o.customer.phone.replace(/^\+91(\d{5})(\d{5})$/, '+91 $1 $2')}</div>
-                  <div className="muted">{formatAddress(o.customer.address)}</div>
-                </div>
-                <div>
-                  <div className="label">Items</div>
-                  {o.items.map((i) => (
-                    <div
-                      key={i.catalogId}
-                      style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}
-                    >
-                      <span>
-                        {i.brand} {i.strength} <span className="muted">({i.generic})</span>
-                        <br />
-                        <span className="muted">
-                          {i.packs} × {i.packSize} {i.packUnit}
-                        </span>
-                      </span>
-                      <span>₹{i.lineTotal}</span>
-                    </div>
-                  ))}
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      borderTop: '1px solid var(--border)',
-                      marginTop: '0.4rem',
-                      paddingTop: '0.4rem',
-                      fontWeight: 700,
-                    }}
-                  >
-                    <span>Collect on delivery</span>
-                    <span>₹{o.total}</span>
-                  </div>
-                </div>
-              </div>
+  const steps: StepItem[] = failed
+    ? [
+        { label: 'Order placed', at: formatDateTime(o.createdAt) },
+        { label: STATUS_LABEL[o.status], at: formatDateTime(o.updatedAt), note: o.rejectionReason },
+      ]
+    : FLOW.map((s) => ({
+        label: STATUS_LABEL[s].replace('New order', 'Order placed'),
+        at:
+          s === 'placed'
+            ? formatDateTime(o.createdAt)
+            : s === o.status
+              ? formatDateTime(o.updatedAt)
+              : undefined,
+      }));
+  const current = failed ? 1 : FLOW.indexOf(o.status);
 
-              {o.rejectionReason && (
-                <div className="muted" style={{ marginTop: '0.5rem' }}>
-                  Reason: {o.rejectionReason}
-                </div>
-              )}
-
-              {(next || canReject) && (
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.9rem' }}>
-                  {next && (
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      disabled={busy === o.id}
-                      onClick={() => move(o, next.status)}
-                    >
-                      {next.label}
-                    </button>
-                  )}
-                  {canReject && (
-                    <button
-                      type="button"
-                      className="btn btn-danger"
-                      disabled={busy === o.id}
-                      onClick={() => move(o, 'rejected')}
-                    >
-                      Reject
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+  return (
+    <Drawer
+      title={o.orderNumber}
+      subtitle={`Placed ${formatDateTime(o.createdAt)}`}
+      onClose={onClose}
+      footer={
+        (next || canReject) && (
+          <>
+            {canReject && (
+              <Button variant="danger" disabled={busy} onClick={onReject}>
+                Reject
+              </Button>
+            )}
+            {next && (
+              <Button disabled={busy} onClick={() => onMove(next.status)}>
+                {next.label}
+              </Button>
+            )}
+          </>
+        )
+      }
+    >
+      <div className="row-between">
+        <Badge tone={STATUS_TONE[o.status]}>{STATUS_LABEL[o.status]}</Badge>
+        <Badge tone="neutral" noDot>
+          Cash on delivery
+        </Badge>
       </div>
-    </div>
+
+      <section>
+        <div className="section-title">Progress</div>
+        <Steps steps={steps} current={current} failed={failed} />
+      </section>
+
+      <section>
+        <div className="section-title">Customer</div>
+        <div className="panel stack" style={{ gap: 10 }}>
+          <div className="row">
+            <Avatar name={o.customer.name} />
+            <div className="strong">{o.customer.name}</div>
+          </div>
+          <div className="row muted">
+            <Phone size={15} />
+            <a href={`tel:${o.customer.phone}`}>{formatPhone(o.customer.phone)}</a>
+          </div>
+          <div className="row muted" style={{ alignItems: 'flex-start' }}>
+            <MapPin size={15} style={{ marginTop: 3, flex: 'none' }} />
+            <span>{formatAddress(o.customer.address)}</span>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div className="section-title">Items</div>
+        <div className="panel stack" style={{ gap: 10 }}>
+          {o.items.map((i) => (
+            <div key={i.catalogId} className="row-between" style={{ alignItems: 'flex-start' }}>
+              <div>
+                <div className="strong">
+                  {i.brand} {i.strength}
+                </div>
+                <div className="muted">
+                  {i.generic} · {i.packs} × {i.packSize} {i.packUnit} @ {inr(i.pricePerPack)}
+                </div>
+              </div>
+              <div className="strong">{inr(i.lineTotal)}</div>
+            </div>
+          ))}
+          <div
+            className="row-between"
+            style={{ borderTop: '1px solid var(--n-100)', paddingTop: 10 }}
+          >
+            <span className="strong">Collect on delivery</span>
+            <span className="strong" style={{ fontSize: '1.2rem' }}>
+              {inr(o.total)}
+            </span>
+          </div>
+        </div>
+      </section>
+    </Drawer>
   );
 };
