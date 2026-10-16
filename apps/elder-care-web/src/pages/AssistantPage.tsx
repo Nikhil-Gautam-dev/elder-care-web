@@ -90,6 +90,7 @@ export const AssistantPage: React.FC = () => {
     isListening,
     start: startListening,
     stop: stopListening,
+    cancel: cancelListening,
     supported: micSupported,
   } = useVoiceInput({
     lang: speechLang,
@@ -131,7 +132,8 @@ export const AssistantPage: React.FC = () => {
     }
     setVoiceError('');
     if (isListening) {
-      stopListening();
+      cancelListening();
+      cancelCountdown();
     } else {
       stop();
       cancelCountdown();
@@ -202,7 +204,7 @@ export const AssistantPage: React.FC = () => {
     if (confirmReset || panelOpen) return;
     if (e.key === 'Escape') {
       if (countdown !== null) cancelCountdown();
-      else if (isListening) stopListening();
+      else if (isListening) cancelListening();
       else if (isSpeaking) stop();
       return;
     }

@@ -76,6 +76,14 @@ export function useVoiceInput(options: Options) {
     setIsListening(false);
   }, []);
 
+  /** Manual stop: end listening and drop what was dictated, keeping only the text typed before. */
+  const cancel = useCallback(() => {
+    stop();
+    committedRef.current = '';
+    sessionRef.current = '';
+    opts.current.onText(baseRef.current);
+  }, [stop]);
+
   const start = useCallback(
     (baseText: string) => {
       if (!Recognition) return;
@@ -90,6 +98,8 @@ export function useVoiceInput(options: Options) {
       recognition.lang = opts.current.lang;
 
       recognition.onresult = (event: any) => {
+        // Late results can still arrive after stop(); they must not re-arm the silence timer.
+        if (!wantListening.current) return;
         sessionRef.current = assembleTranscript(event.results);
         opts.current.onText(fullText());
 
@@ -148,5 +158,5 @@ export function useVoiceInput(options: Options) {
     [],
   );
 
-  return { isListening, start, stop, supported: !!Recognition };
+  return { isListening, start, stop, cancel, supported: !!Recognition };
 }
